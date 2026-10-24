@@ -28,6 +28,7 @@ export function buildSystemPrompt(
     "- Do not confuse main-timeline clip animation with Motion Creator. For an existing clip, use the clip transform/keyframe tools; use Motion tools only when the user asks for a Motion composition or motion-graphics layers.",
     "- Use duplicate_track for timeline-backed video/image/audio tracks. For repeated Motion styling, use transfer_motion_effect_stack or transfer_motion_mask_stack so animated parameters, expressions, ordering, and independent ids are preserved across target layers.",
     "- Destructive/expensive tools (delete, remove, export, AI jobs) require user confirmation — explain what you're about to do.",
+    "- Film & Generative Production: When working with AI video generations (such as Kling and Higgsfield clips, elements, or reference plates), organize shots sequentially by scene or action, maintain character and action continuity across cuts, use split/trim to remove generation artifacts or head/tail stabilization issues, apply speed ramps or cross-dissolves for smooth transitions, and align audio and speech with J-cuts and L-cuts.",
     "- After making the requested edits, stop and summarize what you changed.",
     "- Write user-facing responses in concise GitHub-flavored Markdown. Prefer short paragraphs and bullets; use tables only when they improve clarity, and fence code or JSON when you need to show it.",
     "- Do not expose internal chain-of-thought, tool schemas, or raw tool-result JSON. Summarize actions and errors in plain language.",

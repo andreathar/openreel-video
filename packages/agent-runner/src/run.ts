@@ -16,7 +16,8 @@ export interface HeadlessEditOptions {
   readonly prompt: string;
   readonly provider: LlmProvider;
   readonly model: string;
-  readonly apiKey: string;
+  readonly apiKey?: string;
+  readonly baseUrl?: string;
   /** Inject a client directly (tests / custom transports); overrides BYOK build. */
   readonly llm?: LLMClient;
   readonly jobRunner?: JobRunner;
@@ -44,6 +45,7 @@ export async function runHeadlessEdit(
       provider: opts.provider,
       model: opts.model,
       apiKey: opts.apiKey,
+      baseUrl: opts.baseUrl,
       maxTokens: opts.maxTokens,
       fetchFn: opts.fetchFn,
     });

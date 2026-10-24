@@ -357,10 +357,12 @@ const ASPECT_PRESETS: Array<{
 }> = [
   { label: "16:9", width: 1920, height: 1080 },
   { label: "9:16", width: 1080, height: 1920 },
+  { label: "2.39:1", width: 3840, height: 1608 },
+  { label: "1.85:1", width: 1998, height: 1080 },
+  { label: "21:9", width: 2560, height: 1080 },
   { label: "1:1", width: 1080, height: 1080 },
   { label: "4:5", width: 1080, height: 1350 },
   { label: "4:3", width: 1440, height: 1080 },
-  { label: "21:9", width: 2560, height: 1080 },
 ];
 
 const aspectLabelFor = (width: number, height: number): string => {

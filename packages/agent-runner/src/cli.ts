@@ -8,6 +8,7 @@ interface CliArgs {
   prompt?: string;
   provider: LlmProvider;
   model?: string;
+  baseUrl?: string;
   out?: string;
   dryRun: boolean;
 }
@@ -26,11 +27,22 @@ function parseArgs(argv: string[]): CliArgs {
       case "-m":
         args.prompt = next();
         break;
-      case "--provider":
-        args.provider = next() === "openai" ? "openai" : "anthropic";
+      case "--provider": {
+        const val = next().toLowerCase();
+        args.provider =
+          val === "openai"
+            ? "openai"
+            : val === "openai-compatible" || val === "compatible" || val === "local"
+              ? "openai-compatible"
+              : "anthropic";
         break;
+      }
       case "--model":
         args.model = next();
+        break;
+      case "--base-url":
+      case "-u":
+        args.baseUrl = next();
         break;
       case "--out":
       case "-o":
@@ -59,6 +71,7 @@ function resolveApiKey(provider: LlmProvider): string {
 const DEFAULT_MODEL: Record<LlmProvider, string> = {
   anthropic: "claude-sonnet-5",
   openai: "gpt-5.6-sol",
+  "openai-compatible": "qwen/qwen3.5-9b",
 };
 
 const USAGE = `openreel-agent — headless project editing
@@ -67,14 +80,15 @@ Usage:
   openreel-agent --project <file.json> --prompt "<instruction>" [options]
 
 Options:
-  -p, --project <path>   Project JSON to edit (required)
-  -m, --prompt  <text>   Natural-language editing instruction (required)
-      --provider <name>  anthropic | openai (default: anthropic)
-      --model <id>       Model id (default: provider default)
-  -o, --out <path>       Output path (default: edit in place)
-      --dry-run          Plan without applying mutations
+  -p, --project  <path>   Project JSON to edit (required)
+  -m, --prompt   <text>   Natural-language editing instruction (required)
+      --provider <name>   anthropic | openai | openai-compatible (default: anthropic)
+      --model    <id>     Model id (default: provider default)
+  -u, --base-url <url>    Base URL for openai-compatible (default: http://localhost:1235/v1)
+  -o, --out      <path>   Output path (default: edit in place)
+      --dry-run           Plan without applying mutations
 
-API key (never stored): OPENREEL_API_KEY, or ANTHROPIC_API_KEY / OPENAI_API_KEY.`;
+API key (optional for local/openai-compatible): OPENREEL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY.`;
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
@@ -83,7 +97,7 @@ async function main(): Promise<void> {
     process.exit(args.project || args.prompt ? 1 : 0);
   }
   const apiKey = resolveApiKey(args.provider);
-  if (!apiKey) {
+  if (!apiKey && args.provider !== "openai-compatible") {
     process.stderr.write(
       `No API key found. Set OPENREEL_API_KEY (or ${args.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"}).\n`,
     );
@@ -91,6 +105,7 @@ async function main(): Promise<void> {
   }
 
   const model = args.model ?? DEFAULT_MODEL[args.provider];
+  const baseUrl = args.baseUrl ?? process.env.LOCAL_LLM_URL ?? process.env.OPENAI_BASE_URL ?? "http://localhost:1235/v1";
   try {
     const { result, saved } = await runHeadlessEditFile({
       projectPath: args.project,
@@ -98,6 +113,7 @@ async function main(): Promise<void> {
       provider: args.provider,
       model,
       apiKey,
+      baseUrl,
       outPath: args.out,
       dryRun: args.dryRun,
     });

@@ -125,9 +125,9 @@ export const useSettingsStore = create<SettingsState>()(
         language: "en",
 
         defaultTtsProvider: "elevenlabs" as TtsProvider,
-        defaultLlmProvider: null,
-        llmBaseUrl: "",
-        llmModel: "",
+        defaultLlmProvider: "openai-compatible" as LlmProvider,
+        llmBaseUrl: "http://localhost:1235/v1",
+        llmModel: "qwen/qwen3.5-9b",
         defaultAggregator: "kie-ai" as AggregatorProvider,
         elevenLabsModel: "eleven_v3",
         favoriteVoices: [],

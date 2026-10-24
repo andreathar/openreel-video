@@ -13,11 +13,14 @@ import { EDITING_FRAME_RATE_OPTIONS } from "../editing-frame-rate";
 const ASPECT_PRESETS: Array<{ label: string; width: number; height: number }> = [
   { label: "16:9 Landscape (1080p)", width: 1920, height: 1080 },
   { label: "9:16 Vertical (TikTok/Reels)", width: 1080, height: 1920 },
+  { label: "2.39:1 Anamorphic Scope", width: 3840, height: 1608 },
+  { label: "1.85:1 DCI Flat", width: 1998, height: 1080 },
+  { label: "4K DCI (4096×2160)", width: 4096, height: 2160 },
+  { label: "4K UHD Landscape", width: 3840, height: 2160 },
+  { label: "21:9 Ultra-Wide", width: 2560, height: 1080 },
   { label: "1:1 Square", width: 1080, height: 1080 },
   { label: "4:5 Portrait", width: 1080, height: 1350 },
   { label: "4:3 Standard", width: 1440, height: 1080 },
-  { label: "21:9 Cinematic", width: 2560, height: 1080 },
-  { label: "4K Landscape", width: 3840, height: 2160 },
 ];
 
 const BACKGROUND_SWATCHES = [
@@ -377,7 +380,7 @@ export const GeneralPanel: React.FC = () => {
                 placeholder={
                   defaultLlmProvider === "anthropic-compatible"
                     ? "https://gateway.example/v1"
-                    : "http://localhost:11434/v1"
+                    : "http://localhost:1235/v1"
                 }
                 width="100%"
               />
@@ -385,7 +388,7 @@ export const GeneralPanel: React.FC = () => {
                 label="Model ID"
                 value={llmModel}
                 onChange={setLlmModel}
-                placeholder="Enter any model ID from your endpoint"
+                placeholder="qwen/qwen3.5-9b"
                 width="100%"
               />
               <Text type="supporting" color="secondary" className="block text-[11px] leading-relaxed">

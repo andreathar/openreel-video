@@ -48,4 +48,27 @@ describe("makeNodeLLMSend", () => {
     const send = makeNodeLLMSend("openai", "k", fetchFn as unknown as typeof fetch);
     await expect(send({})).rejects.toThrow(/openai 429/);
   });
+
+  it("routes openai-compatible requests to localhost:1235 by default without requiring an API key", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(okResponse({ ok: true }));
+    const send = makeNodeLLMSend("openai-compatible", undefined, fetchFn as unknown as typeof fetch);
+    await send({ model: "qwen/qwen3.5-9b" });
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://localhost:1235/v1/chat/completions");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("accepts a custom baseUrl for openai-compatible requests", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(okResponse({ ok: true }));
+    const send = makeNodeLLMSend("openai-compatible", "test-key", fetchFn as unknown as typeof fetch, "http://192.168.1.50:1235/v1");
+    await send({ model: "qwen/qwen3.5-9b" });
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe("http://192.168.1.50:1235/v1/chat/completions");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer test-key");
+  });
 });
