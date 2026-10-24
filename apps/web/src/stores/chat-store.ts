@@ -269,7 +269,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ status: "error", error: error instanceof Error ? error.message : "Invalid connection settings", abortController: null });
       return;
     }
-    const tools = editingToolDefs(provider === "anthropic" ? "anthropic" : "openai");
+    const tools = editingToolDefs(provider === "anthropic" ? "anthropic" : "openai", trimmed);
     const autoConfirm = useSettingsStore.getState().agentAutoConfirm;
     const dryRun = useSettingsStore.getState().agentDryRun;
 

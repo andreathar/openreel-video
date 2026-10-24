@@ -84,8 +84,66 @@ const SPECIAL_DESCRIPTIONS: Record<string, string> = {
   apply_edit_preset: "Apply a reusable effect/transition preset to exactly one clip. Supply nextClipId for a transition. Preset IDs are regenerated; existing effects are retained.",
   set_text_timing: "Move or trim a text overlay by stable clipId, preserving its content, style and unrelated elements.",
 };
-export function editingToolDefs(provider: "openai" | "anthropic"): unknown[] {
-  return Object.entries(EDIT_TOOL_SCHEMAS).map(([name, schema]) => {
+export function sanitizeToolSchema(schema: unknown): unknown {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(sanitizeToolSchema);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
+    if (k === "maxItems" || k === "maxLength" || k === "minimum" || k === "maximum" || k === "pattern") {
+      continue;
+    }
+    out[k] = sanitizeToolSchema(v);
+  }
+  return out;
+}
+
+const CORE_EDITING_TOOLS = new Set([
+  "get_editor_state", "list_media", "list_tracks", "list_clips", "get_clip",
+  "inspect_media", "inspect_preview", "get_capabilities", "get_transition_options",
+  "add_clip", "remove_clip", "move_clip", "trim_clip", "split_clip",
+  "set_clip_speed", "set_clip_reverse", "set_clip_pitch_correction",
+  "set_clip_volume", "set_clip_fade", "set_clip_transform",
+  "add_track", "rename_track", "reorder_track", "hide_track", "mute_track",
+]);
+
+export function editingToolDefs(provider: "openai" | "anthropic", prompt?: string): unknown[] {
+  let entries = Object.entries(EDIT_TOOL_SCHEMAS);
+  if (prompt && prompt.trim()) {
+    const p = prompt.toLowerCase();
+    const wanted = new Set(CORE_EDITING_TOOLS);
+    if (/effect|filter|color|vignette|blur|brightness|contrast|saturation|hue|sharpen|grain|visual/i.test(p)) {
+      wanted.add("add_video_effect"); wanted.add("remove_video_effect"); wanted.add("update_video_effect"); wanted.add("toggle_video_effect");
+    }
+    if (/audio|sound|eq|equalizer|reverb|compressor|noise|voice|music|gain|pan|delay/i.test(p)) {
+      wanted.add("add_audio_effect"); wanted.add("update_audio_effect"); wanted.add("remove_audio_effect"); wanted.add("toggle_audio_effect");
+    }
+    if (/text|title|font|style|subtitle|caption/i.test(p)) {
+      wanted.add("create_text_clip"); wanted.add("update_text_clip"); wanted.add("set_text_timing"); wanted.add("remove_text_clip");
+      wanted.add("add_subtitle"); wanted.add("update_subtitle"); wanted.add("remove_subtitle"); wanted.add("list_text_clips");
+    }
+    if (/transition|crossfade|dissolve|wipe|slide|fade between|join/i.test(p)) {
+      wanted.add("add_transition"); wanted.add("update_transition"); wanted.add("remove_transition");
+    }
+    if (/keyframe|animate|easing/i.test(p)) {
+      wanted.add("add_keyframe"); wanted.add("remove_keyframe"); wanted.add("set_clip_keyframes");
+    }
+    if (/marker|chapter|tag|flag/i.test(p)) {
+      wanted.add("add_marker"); wanted.add("remove_marker"); wanted.add("update_marker");
+    }
+    if (/preset|template/i.test(p)) {
+      wanted.add("apply_edit_preset");
+    }
+    if (/setting|resolution|fps|aspect|canvas|dimension/i.test(p)) {
+      wanted.add("update_project_settings");
+    }
+    if (/export|render|encode|output/i.test(p)) {
+      wanted.add("open_export");
+    }
+    entries = entries.filter(([name]) => wanted.has(name));
+  }
+
+  return entries.map(([name, rawSchema]) => {
+    const schema = provider === "openai" ? sanitizeToolSchema(rawSchema) : rawSchema;
     const description = SPECIAL_DESCRIPTIONS[name] ?? getTool(name)?.description ?? name;
     return provider === "anthropic" ? { name, description, input_schema: schema } : { type: "function", function: { name, description, parameters: schema } };
   });

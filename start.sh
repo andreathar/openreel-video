@@ -17,5 +17,5 @@ if [ ! -d "packages/core/src/wasm/build" ]; then
   pnpm build:wasm
 fi
 
-echo "Starting dev server at http://localhost:5174"
-pnpm dev -- --port 5174
+echo "Starting dev server at http://localhost:5180"
+pnpm dev

@@ -11,6 +11,7 @@ export function validateAIEndpoint(baseUrl: string): string {
 }
 export function makeDirectBYOKClient(options: DirectConnection): LLMClient {
   const baseUrl = validateAIEndpoint(options.baseUrl);
+  const isLocal = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(baseUrl).hostname);
   if (!options.model.trim()) throw new Error("Enter a model ID that supports tools.");
   if (options.apiKey && /[\r\n]/.test(options.apiKey)) throw new Error("Invalid API key.");
   const provider = options.provider === "anthropic" ? "anthropic" : "openai";
@@ -23,8 +24,31 @@ export function makeDirectBYOKClient(options: DirectConnection): LLMClient {
       if (options.signal?.aborted) throw error;
       throw new Error("The model endpoint could not be reached. Check its URL and browser CORS support. No proxy or security bypass is used.");
     }
-    // Never include upstream response bodies: providers can echo credentials.
-    if (!res.ok) throw new LLMHttpError(`Model endpoint returned HTTP ${res.status}. Check the key, model ID and provider settings.`, res.status, parseRetryAfterMs(res.headers.get("retry-after")));
+    // Surface local endpoint errors directly; for remote endpoints, avoid echoing credentials.
+    if (!res.ok) {
+      let detail = "";
+      if (isLocal) {
+        try {
+          const rawErr = await res.json() as Record<string, any>;
+          if (typeof rawErr?.error === "string") {
+            try {
+              const inner = JSON.parse(rawErr.error);
+              detail = inner?.error?.message || rawErr.error;
+            } catch {
+              detail = rawErr.error;
+            }
+          } else if (rawErr?.error?.message) {
+            detail = rawErr.error.message;
+          }
+        } catch {
+          // ignore json parse error
+        }
+      }
+      const safeMessage = detail
+        ? `Model endpoint returned HTTP ${res.status}: ${detail}`
+        : `Model endpoint returned HTTP ${res.status}. Check the key, model ID and provider settings.`;
+      throw new LLMHttpError(safeMessage, res.status, parseRetryAfterMs(res.headers.get("retry-after")));
+    }
     let raw: unknown;
     try { raw = await res.json(); } catch { throw new Error("The endpoint returned invalid JSON. Check the API adapter and endpoint."); }
     if (!raw || typeof raw !== "object" || (provider === "openai" && !("choices" in raw)) || (provider === "anthropic" && !("content" in raw))) throw new Error("The endpoint returned an unsupported response. Choose the correct API adapter and a tool-capable model.");
