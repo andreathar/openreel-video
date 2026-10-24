@@ -34,4 +34,29 @@ describe("script tools", () => {
     expect(shots[0].shotId).toBe("HSTL_S001_SH01");
     expect(shots.every((s) => !s.linked)).toBe(true);
   });
+
+  it("tracks entities, prompts and takes in the production manifest", async () => {
+    const host = new HeadlessHost(makeEmptyProject());
+    await executeTool("import_script", { fountain: SCRIPT, projectCode: "HSTL" }, host);
+
+    const entity = await executeTool("upsert_entity", { kind: "CHR", displayName: "MARA", kling: { elementId: "321", type: "image" } }, host);
+    expect((entity.data as { entity: { code: string } }).entity.code).toBe("HSTL-CHR-MARA");
+
+    const updated = await executeTool("update_shot", { shotId: "HSTL_S001_SH01", prompt: "Mara lands in the vault" }, host);
+    expect(updated.ok).toBe(true);
+
+    const payload = await executeTool("get_shot_prompt", { shotId: "HSTL_S001_SH01" }, host);
+    const data = payload.data as { prompt: string; elements: string; target: { tool: string; model: string } };
+    expect(data.prompt).toBe("<<<321>>> lands in the vault");
+    expect(data.target).toEqual(expect.objectContaining({ tool: "omni_ref_video", model: "kling-video-v4_0" }));
+
+    const take = await executeTool("record_take", { shotId: "HSTL_S001_SH01", generationId: "gen-9" }, host);
+    expect((take.data as { take: { fileName: string } }).take.fileName).toBe("HSTL_S001_SH01_kl-v4_T01.mp4");
+
+    const clip = host.getProject().timeline.tracks.find((t) => t.id === "script-shots")!.clips[0];
+    expect((clip.metadata?.script as { status: string }).status).toBe("queued");
+
+    const bad = await executeTool("update_shot", { shotId: "HSTL_S001_SH01", targetId: "nope" }, host);
+    expect(bad.ok).toBe(false);
+  });
 });

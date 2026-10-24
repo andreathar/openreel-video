@@ -2,10 +2,10 @@ import type { Project } from "../../types/project";
 import { registerActionHandler, createInverseAction } from "../registry";
 
 /** Internal commit boundary. External documents must pass the portable validator. */
-export type EditSnapshot = Pick<Project, "name" | "settings" | "timeline" | "mediaLibrary" | "textClips" | "shapeClips" | "svgClips" | "stickerClips" | "adjustmentLayers" | "masks" | "multicamGroups" | "compoundClips" | "nestedInstances" | "motionCompositions" | "motionInstances" | "generatedShaders" | "creation">;
+export type EditSnapshot = Pick<Project, "name" | "settings" | "timeline" | "mediaLibrary" | "textClips" | "shapeClips" | "svgClips" | "stickerClips" | "adjustmentLayers" | "masks" | "multicamGroups" | "compoundClips" | "nestedInstances" | "motionCompositions" | "motionInstances" | "generatedShaders" | "creation" | "production">;
 export function editSnapshot(project: Project): EditSnapshot {
-  const { name, settings, timeline, mediaLibrary, textClips, shapeClips, svgClips, stickerClips, adjustmentLayers, masks, multicamGroups, compoundClips, nestedInstances, motionCompositions, motionInstances, generatedShaders, creation } = project;
-  return { name, settings, timeline, mediaLibrary, textClips, shapeClips, svgClips, stickerClips, adjustmentLayers, masks, multicamGroups, compoundClips, nestedInstances, motionCompositions, motionInstances, generatedShaders, creation };
+  const { name, settings, timeline, mediaLibrary, textClips, shapeClips, svgClips, stickerClips, adjustmentLayers, masks, multicamGroups, compoundClips, nestedInstances, motionCompositions, motionInstances, generatedShaders, creation, production } = project;
+  return { name, settings, timeline, mediaLibrary, textClips, shapeClips, svgClips, stickerClips, adjustmentLayers, masks, multicamGroups, compoundClips, nestedInstances, motionCompositions, motionInstances, generatedShaders, creation, production };
 }
 registerActionHandler({
   type: "project/applyEditSnapshot",

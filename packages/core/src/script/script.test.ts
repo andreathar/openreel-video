@@ -162,7 +162,7 @@ describe("planProduction", () => {
       for (const shot of scene.shots) {
         expect(parseProductionName(shot.id)?.sceneNumber).toBe(scene.sceneNumber);
         expect(shot.seconds).toBeGreaterThanOrEqual(3);
-        expect(shot.seconds).toBeLessThanOrEqual(15);
+        expect(shot.seconds).toBeLessThanOrEqual(30);
       }
     }
     expect(plan.scenes[0].shots[0].id).toBe("HSTL_S001_SH01");

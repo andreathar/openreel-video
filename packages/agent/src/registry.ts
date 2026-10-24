@@ -19,6 +19,18 @@ import {
   normalizeProjectCode,
   parseFountain,
   planProduction,
+  GENERATION_TARGETS,
+  SHOT_STATUSES,
+  applyProductionManifest,
+  buildShotPrompt,
+  getGenerationTarget,
+  recordProductionTake,
+  updateProductionShot,
+  upsertProductionEntity,
+  validateShotTarget,
+  type ProductionManifest,
+  type ProductionShotPatch,
+  type ShotStatus,
 } from "@openreel/core/script/index";
 import { motionEngine } from "@openreel/core/motion/motion-engine";
 import {
@@ -482,6 +494,17 @@ function ok(summary: string, data?: unknown): ToolResult {
 }
 function fail(message: string, code = "ERROR"): ToolResult {
   return { ok: false, summary: message, error: { code, message } };
+}
+
+/** Saves a production manifest (and mirrored clip statuses) as one undo step. */
+function applyProduction(host: EditingHost, production: ProductionManifest, label: string) {
+  const next = applyProductionManifest(host.getProject(), production);
+  return host.applyAction({
+    type: "project/applyEditSnapshot",
+    id: `${label}-${Date.now()}`,
+    timestamp: Date.now(),
+    params: { snapshot: structuredClone(editSnapshot(next)) },
+  } as Action);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -15738,7 +15761,7 @@ const TOOLS: RegisteredTool[] = [
       SHOT_DURATION_PROFILES.map((p) => `${p.id} (${p.allowedSeconds ? p.allowedSeconds.join("/") : `${p.minSeconds}-${p.maxSeconds}`}s)`).join(", ") +
       ". Set dryRun to preview the breakdown without editing.",
     inputSchema: obj(
-      { fountain: str, projectCode: str, profileId: str, dryRun: { type: "boolean" } },
+      { fountain: str, projectCode: str, profileId: str, defaultTargetId: str, dryRun: { type: "boolean" } },
       ["fountain"],
     ),
     readOnly: false,
@@ -15766,7 +15789,9 @@ const TOOLS: RegisteredTool[] = [
       const shotCount = scenes.reduce((n, scene) => n + scene.shots.length, 0);
       const summary = `${plan.scenes.length} scenes, ${shotCount} shots, ${Math.round(plan.totalSeconds)}s (${projectCode}, ${profileId})`;
       if (args.dryRun === true) return ok(`Script breakdown: ${summary}`, { projectCode, profileId, totalSeconds: plan.totalSeconds, scenes });
-      const next = buildScriptTimeline(project, plan);
+      const defaultTargetId = typeof args.defaultTargetId === "string" && args.defaultTargetId ? args.defaultTargetId : undefined;
+      if (defaultTargetId && !GENERATION_TARGETS.some((t) => t.id === defaultTargetId)) return fail(`Unknown defaultTargetId '${defaultTargetId}'`, "INVALID_PARAMS");
+      const next = buildScriptTimeline(project, plan, { defaultTargetId });
       const result = await host.applyAction({
         type: "project/applyEditSnapshot",
         id: `import-script-${Date.now()}`,
@@ -15812,6 +15837,180 @@ const TOOLS: RegisteredTool[] = [
         })
         .filter((shot) => !wanted || shot.status === wanted);
       return ok(`${shots.length} shots (${shots.filter((s) => s.linked).length} linked)`, { shots });
+    },
+  },
+
+  {
+    name: "list_generation_targets",
+    domain: "read",
+    title: "List generation targets",
+    description:
+      "List the Kling and Higgsfield models a shot can be generated with, including the MCP tool, model id, file-name tag and reference limits (elements, images, videos, audio). Pick a target per shot from what the shot needs to reference.",
+    inputSchema: obj({}),
+    readOnly: true,
+    destructive: false,
+    expensive: false,
+    handler: async () => ok(`${GENERATION_TARGETS.length} generation targets`, { targets: GENERATION_TARGETS }),
+  },
+  {
+    name: "get_production",
+    domain: "read",
+    title: "Get production manifest",
+    description:
+      "Read the production manifest of a script project: entities (characters/locations with canonical names like HSTL-CHR-MARA and their Kling/Higgsfield element ids) and shots (target, prompt, references, status, takes with generation ids). Filter shots by status or sceneCode. Each shot includes reference-limit issues for its target.",
+    inputSchema: obj({ status: str, sceneCode: str }),
+    readOnly: true,
+    destructive: false,
+    expensive: false,
+    handler: async (args, host) => {
+      const production = host.getProject().production;
+      if (!production) return ok("No production manifest. Use import_script first.", { production: null });
+      const status = typeof args.status === "string" && args.status ? args.status : undefined;
+      const scene = typeof args.sceneCode === "string" && args.sceneCode ? args.sceneCode : undefined;
+      const shots = production.shots
+        .filter((s) => (!status || s.status === status) && (!scene || s.sceneCode === scene))
+        .map((s) => ({ ...s, issues: validateShotTarget(s, production) }));
+      return ok(`${shots.length} shots, ${production.entities.length} entities (${production.projectCode})`, {
+        projectCode: production.projectCode,
+        defaultTargetId: production.defaultTargetId,
+        entities: production.entities,
+        shots,
+      });
+    },
+  },
+  {
+    name: "update_shot",
+    domain: "project",
+    title: "Update production shot",
+    description:
+      "Update one shot of the production manifest: targetId (see list_generation_targets), prompt, status (" +
+      SHOT_STATUSES.join(", ") +
+      "), refs {images, videos, audios} as project-relative paths, entities (entity codes) or selectedTake. Writing a prompt on a todo shot marks it prompted. The clip on the SHOTS track mirrors the status.",
+    inputSchema: obj(
+      { shotId: str, targetId: str, prompt: str, status: str, refs: { type: "object" }, entities: { type: "array", items: str }, selectedTake: num },
+      ["shotId"],
+    ),
+    readOnly: false,
+    destructive: false,
+    expensive: false,
+    handler: async (args, host) => {
+      host.requireOpenProject();
+      const production = host.getProject().production;
+      if (!production) return fail("No production manifest. Use import_script first.", "INVALID_PARAMS");
+      if (args.status !== undefined && !SHOT_STATUSES.includes(args.status as ShotStatus)) return fail(`Unknown status '${String(args.status)}'`, "INVALID_PARAMS");
+      const patch: Record<string, unknown> = {};
+      for (const key of ["targetId", "prompt", "status", "entities", "selectedTake"] as const) {
+        if (args[key] !== undefined) patch[key] = args[key];
+      }
+      if (args.refs && typeof args.refs === "object") {
+        const refs = args.refs as Record<string, unknown>;
+        const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+        patch.refs = { images: list(refs.images), videos: list(refs.videos), audios: list(refs.audios) };
+      }
+      try {
+        const next = updateProductionShot(production, String(args.shotId), patch as ProductionShotPatch);
+        const result = await applyProduction(host, next, "update-shot");
+        if (!result.success) return fail(result.error?.message ?? "Failed to update shot");
+        const shot = next.shots.find((s) => s.id === args.shotId)!;
+        return ok(`Updated ${shot.id} (${shot.status}, ${shot.targetId})`, { shot, issues: validateShotTarget(shot, next) });
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : String(error), "INVALID_PARAMS");
+      }
+    },
+  },
+  {
+    name: "upsert_entity",
+    domain: "project",
+    title: "Add or update production entity",
+    description:
+      "Add or update a character (CHR), location (LOC), prop (PRP) or voice (VOX). The canonical code (e.g. HSTL-CHR-MARA, max 32 chars) is the name to give the element on Kling and Higgsfield. Store the platform ids after creating elements: kling {elementId, type: image|video}, higgsfield {elementId?, soulId?}. refs are project-relative reference files.",
+    inputSchema: obj(
+      { kind: str, displayName: str, code: str, description: str, refs: { type: "array", items: str }, kling: { type: "object" }, higgsfield: { type: "object" } },
+      ["kind", "displayName"],
+    ),
+    readOnly: false,
+    destructive: false,
+    expensive: false,
+    handler: async (args, host) => {
+      host.requireOpenProject();
+      const production = host.getProject().production;
+      if (!production) return fail("No production manifest. Use import_script first.", "INVALID_PARAMS");
+      const kind = String(args.kind);
+      if (!["CHR", "LOC", "PRP", "VOX"].includes(kind)) return fail("kind must be CHR, LOC, PRP or VOX", "INVALID_PARAMS");
+      const entity = {
+        kind: kind as "CHR" | "LOC" | "PRP" | "VOX",
+        displayName: String(args.displayName),
+        ...(typeof args.code === "string" && args.code ? { code: args.code } : {}),
+        ...(typeof args.description === "string" ? { description: args.description } : {}),
+        ...(Array.isArray(args.refs) ? { refs: args.refs.map(String) } : {}),
+        ...(args.kling && typeof args.kling === "object" ? { kling: args.kling as { elementId: string; type: "image" | "video" } } : {}),
+        ...(args.higgsfield && typeof args.higgsfield === "object" ? { higgsfield: args.higgsfield as { elementId?: string; soulId?: string } } : {}),
+      };
+      const next = upsertProductionEntity(production, entity);
+      const result = await applyProduction(host, next, "upsert-entity");
+      if (!result.success) return fail(result.error?.message ?? "Failed to save entity");
+      const saved = next.entities.find((e) => e.displayName === entity.displayName && e.kind === entity.kind) ?? next.entities[next.entities.length - 1];
+      return ok(`Saved ${saved.code}`, { entity: saved });
+    },
+  },
+  {
+    name: "get_shot_prompt",
+    domain: "read",
+    title: "Get shot generation payload",
+    description:
+      "Build what to submit for a shot on its target (or targetId): the prompt with entities bound as <<<elementId>>>, the Kling 'elements' argument, the MCP tool and model, the duration, the file name the take must be saved as, and any reference-limit issues.",
+    inputSchema: obj({ shotId: str, targetId: str }, ["shotId"]),
+    readOnly: true,
+    destructive: false,
+    expensive: false,
+    handler: async (args, host) => {
+      const production = host.getProject().production;
+      const shot = production?.shots.find((s) => s.id === args.shotId);
+      if (!production || !shot) return fail(`Unknown shot '${String(args.shotId)}'`, "INVALID_PARAMS");
+      const target = getGenerationTarget(typeof args.targetId === "string" && args.targetId ? args.targetId : shot.targetId);
+      const payload = buildShotPrompt(shot, production, target);
+      const take = shot.takes.reduce((max, t) => Math.max(max, t.take), 0) + 1;
+      return ok(`${shot.id} on ${target.label}`, {
+        shotId: shot.id,
+        target: { id: target.id, platform: target.platform, tool: target.tool, model: target.model },
+        ...payload,
+        duration: target.output === "video" ? shot.seconds : undefined,
+        refs: shot.refs,
+        nextTake: take,
+        issues: validateShotTarget(shot, production, target),
+      });
+    },
+  },
+  {
+    name: "record_take",
+    domain: "project",
+    title: "Record generation take",
+    description:
+      "Record a submitted Kling/Higgsfield generation as the next take of a shot. Platforms cannot name generations, so call this right after submitting with the generationId (Kling) or job id (Higgsfield); the returned fileName (e.g. HSTL_S001_SH01_kl-v4_T02.mp4) is what the download must be saved as. Use status 'done' once downloaded.",
+    inputSchema: obj({ shotId: str, generationId: str, targetId: str, prompt: str, extension: str, status: str }, ["shotId"]),
+    readOnly: false,
+    destructive: false,
+    expensive: false,
+    handler: async (args, host) => {
+      host.requireOpenProject();
+      const production = host.getProject().production;
+      if (!production) return fail("No production manifest. Use import_script first.", "INVALID_PARAMS");
+      const status = typeof args.status === "string" && args.status ? args.status : "queued";
+      if (!["queued", "done", "failed"].includes(status)) return fail("status must be queued, done or failed", "INVALID_PARAMS");
+      try {
+        const { manifest, take } = recordProductionTake(production, String(args.shotId), {
+          ...(typeof args.generationId === "string" ? { generationId: args.generationId } : {}),
+          ...(typeof args.targetId === "string" && args.targetId ? { targetId: args.targetId } : {}),
+          ...(typeof args.prompt === "string" ? { prompt: args.prompt } : {}),
+          ...(typeof args.extension === "string" ? { extension: args.extension } : {}),
+          status: status as "queued" | "done" | "failed",
+        });
+        const result = await applyProduction(host, manifest, "record-take");
+        if (!result.success) return fail(result.error?.message ?? "Failed to record take");
+        return ok(`Take ${take.take} of ${String(args.shotId)}: save as ${take.fileName}`, { take });
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : String(error), "INVALID_PARAMS");
+      }
     },
   },
 

@@ -1,6 +1,7 @@
 import type { MediaItem, Project } from "../types/project";
 import type { Clip, Marker, Track } from "../types/timeline";
 import type { PlannedScene, PlannedShot, ProductionBreakdown } from "./shots";
+import { mergeProductionManifest, type ProductionManifest, type ShotStatus } from "./production";
 
 /**
  * Turns a production breakdown into timeline content: one scene-range marker
@@ -21,7 +22,7 @@ export interface ScriptShotClipMetadata {
   readonly heading: string;
   readonly description: string;
   readonly characters: readonly string[];
-  readonly status: "todo" | "prompted" | "generated" | "selected" | "approved";
+  readonly status: ShotStatus;
 }
 
 export interface BuildScriptTimelineOptions {
@@ -29,6 +30,8 @@ export interface BuildScriptTimelineOptions {
   readonly startTime?: number;
   /** Optional slate image per shot (data URL), shown in the media library. */
   readonly thumbnailFor?: (shot: PlannedShot, scene: PlannedScene) => string | null;
+  /** Generation target for shots new to the production manifest. */
+  readonly defaultTargetId?: string;
 }
 
 function placeholderMedia(shot: PlannedShot, thumbnailUrl: string | null): MediaItem {
@@ -45,14 +48,14 @@ function placeholderMedia(shot: PlannedShot, thumbnailUrl: string | null): Media
   };
 }
 
-function shotClip(shot: PlannedShot, scene: PlannedScene, startTime: number): Clip {
+function shotClip(shot: PlannedShot, scene: PlannedScene, startTime: number, status: ShotStatus): Clip {
   const script: ScriptShotClipMetadata = {
     sceneCode: scene.code,
     shotId: shot.id,
     heading: scene.heading,
     description: shot.description,
     characters: shot.characters,
-    status: "todo",
+    status,
   };
   return {
     id: `clip-${shot.id}`,
@@ -82,6 +85,8 @@ export function buildScriptTimeline(
   options: BuildScriptTimelineOptions = {},
 ): Project {
   let time = options.startTime ?? 0;
+  const production = mergeProductionManifest(project.production, breakdown, options.defaultTargetId);
+  const statusOf = new Map(production.shots.map((s) => [s.id, s.status]));
   const markers: Marker[] = [];
   const clips: Clip[] = [];
   const keptMedia = project.mediaLibrary.items.filter(
@@ -100,7 +105,7 @@ export function buildScriptTimeline(
       color: SCENE_COLORS[idx % SCENE_COLORS.length],
     });
     for (const shot of scene.shots) {
-      clips.push(shotClip(shot, scene, time + shot.offset));
+      clips.push(shotClip(shot, scene, time + shot.offset, statusOf.get(shot.id) ?? "todo"));
       if (!existingIds.has(SCRIPT_SHOT_MEDIA_PREFIX + shot.id)) {
         newMedia.push(placeholderMedia(shot, options.thumbnailFor?.(shot, scene) ?? null));
       }
@@ -135,6 +140,7 @@ export function buildScriptTimeline(
     ...project,
     modifiedAt: Date.now(),
     mediaLibrary: { items: [...keptMedia, ...newMedia] },
+    production,
     timeline: {
       ...project.timeline,
       tracks,
@@ -142,4 +148,26 @@ export function buildScriptTimeline(
       duration: Math.max(otherEnd, time),
     },
   };
+}
+
+/**
+ * Stores an updated production manifest on the project and mirrors each
+ * shot's status onto its SHOTS clip, so the timeline shows progress.
+ */
+export function applyProductionManifest(project: Project, production: ProductionManifest): Project {
+  const statusOf = new Map(production.shots.map((s) => [s.id, s.status]));
+  const tracks = project.timeline.tracks.map((track) => {
+    if (track.id !== SCRIPT_SHOTS_TRACK_ID) return track;
+    return {
+      ...track,
+      clips: track.clips.map((clip) => {
+        const script = clip.metadata?.script as ScriptShotClipMetadata | undefined;
+        const status = script && statusOf.get(script.shotId);
+        return script && status && status !== script.status
+          ? { ...clip, metadata: { ...clip.metadata, script: { ...script, status } } }
+          : clip;
+      }),
+    };
+  });
+  return { ...project, modifiedAt: Date.now(), production, timeline: { ...project.timeline, tracks } };
 }

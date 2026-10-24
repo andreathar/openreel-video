@@ -21,11 +21,13 @@ export const SHOT_DURATION_PROFILES: readonly ShotDurationProfile[] = [
   { id: "kling-v3-omni", label: "Kling 3.0 Omni", platform: "kling", modelTag: "kl-v3o", minSeconds: 3, maxSeconds: 15, defaultSeconds: 5 },
   { id: "kling-v4", label: "Kling 4.0", platform: "kling", modelTag: "kl-v4", minSeconds: 3, maxSeconds: 30, defaultSeconds: 8 },
   { id: "kling-v2-6", label: "Kling 2.6", platform: "kling", modelTag: "kl-v26", minSeconds: 5, maxSeconds: 10, allowedSeconds: [5, 10], defaultSeconds: 5 },
+  // Genjutsu follows its reference video; Kling 4.0 Omni's 3–30s video reference range is used until Higgsfield publishes one.
+  { id: "hf-genjutsu", label: "Higgsfield Genjutsu", platform: "higgsfield", modelTag: "hf-gjm", minSeconds: 3, maxSeconds: 30, defaultSeconds: 8 },
   { id: "hf-seedance-2", label: "Higgsfield Seedance 2.0", platform: "higgsfield", modelTag: "hf-sd2", minSeconds: 4, maxSeconds: 15, defaultSeconds: 5 },
   { id: "generic", label: "Generic (any model)", platform: "generic", modelTag: "gen", minSeconds: 1, maxSeconds: 60, defaultSeconds: 5 },
 ];
 
-export const DEFAULT_SHOT_PROFILE_ID = "kling-v3-omni";
+export const DEFAULT_SHOT_PROFILE_ID = "kling-v4";
 
 export function getShotProfile(id: string): ShotDurationProfile {
   return SHOT_DURATION_PROFILES.find((p) => p.id === id) ?? SHOT_DURATION_PROFILES[0];

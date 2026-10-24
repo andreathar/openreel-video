@@ -1,7 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { Clapperboard, Copy, Download } from "@/icons/lucide-compat";
 import {
+  DEFAULT_GENERATION_TARGET_ID,
   DEFAULT_SHOT_PROFILE_ID,
+  GENERATION_TARGETS,
   SCRIPT_SHOTS_TRACK_ID,
   SHOT_DURATION_PROFILES,
   buildScriptTimeline,
@@ -129,6 +131,7 @@ export const ScriptImportDialog: React.FC<ScriptImportDialogProps> = ({ isOpen, 
   const [source, setSource] = useState("");
   const [codeInput, setCodeInput] = useState("");
   const [profileId, setProfileId] = useState(DEFAULT_SHOT_PROFILE_ID);
+  const [targetId, setTargetId] = useState(DEFAULT_GENERATION_TARGET_ID);
   const [isBuilding, setIsBuilding] = useState(false);
   const hasScriptTrack = useProjectStore((state) =>
     isOpen ? state.project.timeline.tracks.some((t) => t.id === SCRIPT_SHOTS_TRACK_ID) : false,
@@ -158,6 +161,7 @@ export const ScriptImportDialog: React.FC<ScriptImportDialogProps> = ({ isOpen, 
       const sceneColor = new Map(plan.scenes.map((s, i) => [s.code, SCENE_COLORS[i % SCENE_COLORS.length]]));
       const next = buildScriptTimeline(store.getFullProject(), plan, {
         thumbnailFor: (shot, scene) => renderSlate(shot, scene, sceneColor.get(scene.code) ?? "#888"),
+        defaultTargetId: targetId,
       });
       const result = await store.executeAction({
         type: "project/applyEditSnapshot",
@@ -173,7 +177,7 @@ export const ScriptImportDialog: React.FC<ScriptImportDialogProps> = ({ isOpen, 
     } finally {
       setIsBuilding(false);
     }
-  }, [plan, shotCount, onClose]);
+  }, [plan, shotCount, targetId, onClose]);
 
   const handleCopyList = useCallback(async () => {
     if (!plan) return;
@@ -238,6 +242,17 @@ export const ScriptImportDialog: React.FC<ScriptImportDialogProps> = ({ isOpen, 
                   width="100%"
                 />
               </div>
+              <Selector
+                label="Default generator"
+                value={targetId}
+                onChange={(value) => {
+                  setTargetId(value);
+                  const linked = GENERATION_TARGETS.find((t) => t.id === value)?.profileId;
+                  if (linked) setProfileId(linked);
+                }}
+                options={GENERATION_TARGETS.filter((t) => t.output === "video").map((t) => ({ value: t.id, label: t.label }))}
+                width="100%"
+              />
               <Text type="supporting" color="secondary">
                 Shots are named {projectCode}_S001_SH01 and snapped to the model's allowed lengths.
                 Downloaded takes named {projectCode}_S001_SH01_{profile.modelTag}_T01.mp4 relink to their shot.

@@ -143,6 +143,11 @@ export const EditorActionRail: React.FC = () => {
         onClick={() => openModal("scriptImport")}
       />
       <RailButton
+        label="Shot Board (prompts, generators, takes)"
+        icon="list.clipboard"
+        onClick={() => openModal("shotBoard")}
+      />
+      <RailButton
         label="Project JSON / Comments"
         icon="curlybraces"
         onClick={() => openModal("scriptView")}

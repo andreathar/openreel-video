@@ -23,6 +23,8 @@ export interface ProjectSettings {
   readonly channels: number;
 }
 
+import type { ProductionManifest } from "../script/production";
+
 export interface Project {
   readonly id: string;
   readonly name: string;
@@ -44,6 +46,8 @@ export interface Project {
   readonly motionInstances?: MotionCompositionInstance[];
   readonly generatedShaders?: readonly MotionShaderDef[];
   readonly creation?: CreationProjectState;
+  /** Shot list, entities and generation takes of a script-driven production. */
+  readonly production?: ProductionManifest;
   /** Feature capabilities required to edit this project without data loss. */
   readonly capabilities?: readonly string[];
   /** Oldest project reader version that can safely open this project. */
