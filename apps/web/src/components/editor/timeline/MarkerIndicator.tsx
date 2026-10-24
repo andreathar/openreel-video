@@ -26,6 +26,8 @@ export const MarkerIndicator: React.FC<MarkerIndicatorProps> = ({
   const [editedLabel, setEditedLabel] = React.useState(marker.label);
 
   const x = marker.time * pixelsPerSecond - scrollX;
+  // Scene markers span a range; draw a tinted band behind the clips.
+  const width = marker.duration && marker.duration > 0 ? marker.duration * pixelsPerSecond : 0;
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -67,6 +69,17 @@ export const MarkerIndicator: React.FC<MarkerIndicatorProps> = ({
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
     >
+      {width > 0 && (
+        <div
+          className="absolute top-0 bottom-0 left-0 pointer-events-none transition-opacity"
+          style={{
+            width: `${width}px`,
+            backgroundColor: marker.color,
+            opacity: isHovered ? 0.14 : 0.07,
+            borderRight: `1px dashed ${marker.color}`,
+          }}
+        />
+      )}
       <div
         className="w-0.5 h-full transition-opacity"
         style={{
@@ -101,7 +114,12 @@ export const MarkerIndicator: React.FC<MarkerIndicatorProps> = ({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span>{marker.label}</span>
+          <span
+            className={width > 0 ? "max-w-[220px] truncate" : undefined}
+            title={marker.label}
+          >
+            {marker.label}
+          </span>
         )}
         {isHovered && onRemove && (
           <IconButton

@@ -138,6 +138,11 @@ export const EditorActionRail: React.FC = () => {
         active={Boolean(panels.agentChat?.visible)}
       />
       <RailButton
+        label="Import script (Fountain → shots)"
+        icon="clapperboard"
+        onClick={() => openModal("scriptImport")}
+      />
+      <RailButton
         label="Project JSON / Comments"
         icon="curlybraces"
         onClick={() => openModal("scriptView")}

@@ -267,6 +267,10 @@ export interface Marker {
   readonly time: number;
   readonly label: string;
   readonly color: string;
+  /** Range length in seconds. Missing or 0 means a point marker. */
+  readonly duration?: number;
+  /** "scene" markers are generated from an imported screenplay. */
+  readonly kind?: "point" | "scene";
 }
 
 export type TransitionEdge = "in" | "out";

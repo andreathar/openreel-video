@@ -9,6 +9,17 @@ import {
   type CornerRadii,
   type ShapeStyle,
 } from "@openreel/core/graphics/types";
+import { editSnapshot } from "@openreel/core/actions/handlers/edit-snapshot";
+import {
+  DEFAULT_SHOT_PROFILE_ID,
+  SCRIPT_SHOTS_TRACK_ID,
+  SHOT_DURATION_PROFILES,
+  buildScriptTimeline,
+  deriveProjectCode,
+  normalizeProjectCode,
+  parseFountain,
+  planProduction,
+} from "@openreel/core/script/index";
 import { motionEngine } from "@openreel/core/motion/motion-engine";
 import {
   detectMotionBeatMarkersFromPeaks,
@@ -15716,6 +15727,93 @@ const TOOLS: RegisteredTool[] = [
   actionTool({ name: "add_marker", domain: "marker", actionType: "marker/add", title: "Add marker", description: "Add a timeline marker.", inputSchema: obj({ time: num, label: str, color: str }, ["time", "label", "color"]) }),
   actionTool({ name: "remove_marker", domain: "marker", actionType: "marker/remove", title: "Remove marker", description: "Remove a marker.", inputSchema: obj({ markerId: str }, ["markerId"]) }),
   actionTool({ name: "update_marker", domain: "marker", actionType: "marker/update", title: "Update marker", description: "Update a marker.", inputSchema: obj({ markerId: str, updates: { type: "object" } }, ["markerId", "updates"]) }),
+
+  // screenplay → shots
+  {
+    name: "import_script",
+    domain: "project",
+    title: "Import script to shots timeline",
+    description:
+      "Parse a Fountain screenplay into scenes and model-length shots, then build scene range markers plus a SHOTS track of named placeholder clips (e.g. HSTL_S012_SH03) as one undo step. Rebuilding replaces the previous script track/markers but keeps shots already relinked to real files. profileId picks the video model durations: " +
+      SHOT_DURATION_PROFILES.map((p) => `${p.id} (${p.allowedSeconds ? p.allowedSeconds.join("/") : `${p.minSeconds}-${p.maxSeconds}`}s)`).join(", ") +
+      ". Set dryRun to preview the breakdown without editing.",
+    inputSchema: obj(
+      { fountain: str, projectCode: str, profileId: str, dryRun: { type: "boolean" } },
+      ["fountain"],
+    ),
+    readOnly: false,
+    destructive: false,
+    expensive: false,
+    handler: async (args, host) => {
+      host.requireOpenProject();
+      const source = String(args.fountain ?? "");
+      const doc = parseFountain(source);
+      if (doc.scenes.length === 0) return fail("No scene headings found (start scenes with INT./EXT. or a leading '.')", "INVALID_PARAMS");
+      const profileId = typeof args.profileId === "string" && args.profileId ? args.profileId : DEFAULT_SHOT_PROFILE_ID;
+      if (!SHOT_DURATION_PROFILES.some((p) => p.id === profileId)) return fail(`Unknown profileId '${profileId}'`, "INVALID_PARAMS");
+      const project = host.getProject();
+      const projectCode = normalizeProjectCode(
+        typeof args.projectCode === "string" && args.projectCode ? args.projectCode : deriveProjectCode(doc.title ?? project.name) || "PROJ",
+      );
+      const plan = planProduction(doc, { projectCode, profileId });
+      const scenes = plan.scenes.map((scene) => ({
+        code: scene.code,
+        heading: scene.heading,
+        seconds: scene.seconds,
+        characters: scene.characters,
+        shots: scene.shots.map((shot) => ({ id: shot.id, seconds: shot.seconds, description: shot.description })),
+      }));
+      const shotCount = scenes.reduce((n, scene) => n + scene.shots.length, 0);
+      const summary = `${plan.scenes.length} scenes, ${shotCount} shots, ${Math.round(plan.totalSeconds)}s (${projectCode}, ${profileId})`;
+      if (args.dryRun === true) return ok(`Script breakdown: ${summary}`, { projectCode, profileId, totalSeconds: plan.totalSeconds, scenes });
+      const next = buildScriptTimeline(project, plan);
+      const result = await host.applyAction({
+        type: "project/applyEditSnapshot",
+        id: `import-script-${Date.now()}`,
+        timestamp: Date.now(),
+        params: { snapshot: structuredClone(editSnapshot(next)) },
+      } as Action);
+      if (!result.success) return fail(result.error?.message ?? "Failed to apply script timeline");
+      return ok(`Built script timeline: ${summary}`, { projectCode, profileId, trackId: SCRIPT_SHOTS_TRACK_ID, totalSeconds: plan.totalSeconds, scenes });
+    },
+  },
+  {
+    name: "list_script_shots",
+    domain: "read",
+    title: "List script shots",
+    description:
+      "List the shots on the script SHOTS track with shot id, scene, start time, length, characters, description, production status and whether a real take is linked. Use it to report what still needs prompting or generating.",
+    inputSchema: obj({ status: str }),
+    readOnly: true,
+    destructive: false,
+    expensive: false,
+    handler: async (args, host) => {
+      const project = host.getProject();
+      const track = project.timeline.tracks.find((t) => t.id === SCRIPT_SHOTS_TRACK_ID);
+      if (!track) return ok("No script SHOTS track in this project. Use import_script first.", { shots: [] });
+      const mediaById = new Map(project.mediaLibrary.items.map((item) => [item.id, item]));
+      const wanted = typeof args.status === "string" && args.status ? args.status : undefined;
+      const shots = track.clips
+        .map((clip) => {
+          const meta = (clip.metadata?.script ?? {}) as Record<string, unknown>;
+          const media = mediaById.get(clip.mediaId);
+          return {
+            clipId: clip.id,
+            shotId: meta.shotId ?? media?.name,
+            scene: meta.sceneCode,
+            heading: meta.heading,
+            startTime: clip.startTime,
+            duration: clip.duration,
+            characters: meta.characters ?? [],
+            description: meta.description,
+            status: meta.status ?? "todo",
+            linked: Boolean(media && !media.isPlaceholder),
+          };
+        })
+        .filter((shot) => !wanted || shot.status === wanted);
+      return ok(`${shots.length} shots (${shots.filter((s) => s.linked).length} linked)`, { shots });
+    },
+  },
 
   // overlays (raw clip payloads)
   {

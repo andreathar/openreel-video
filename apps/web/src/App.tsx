@@ -16,6 +16,9 @@ const EditorInterface = lazy(() =>
     default: m.EditorInterface,
   }))
 );
+const ScriptImportDialog = lazy(() =>
+  import("./components/editor/ScriptImportDialog").then((m) => ({ default: m.ScriptImportDialog })),
+);
 const ScriptViewDialog = lazy(() =>
   import("./components/editor/ScriptViewDialog").then((m) => ({ default: m.ScriptViewDialog })),
 );
@@ -174,6 +177,7 @@ function App() {
       <ToastContainer />
       <Suspense fallback={null}>
         {(hasOpenedScriptView || activeModal === "scriptView") && <ScriptViewDialog isOpen={activeModal === "scriptView"} onClose={closeModal} />}
+        {activeModal === "scriptImport" && <ScriptImportDialog isOpen onClose={closeModal} />}
         {activeModal === "search" && <SearchModal isOpen onClose={closeModal} />}
       </Suspense>
       {showDialog && availableSaves.length > 0 && (

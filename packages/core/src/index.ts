@@ -19,6 +19,7 @@ export * from "./animation";
 export * from "./effects";
 export * from "./device";
 export * from "./multicam";
+export * from "./script";
 export {
   ExportEngine,
   getExportEngine,
