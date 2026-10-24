@@ -79,6 +79,11 @@ that is why every submission must be recorded with `prod record` immediately, be
 11. **Hand back to the editor**: tell the user to press **Sync** in the Shot Board (it also syncs
    every 10 s while open). The editor links the selected take — or the newest finished one — to
    the shot's placeholder clip. `prod set … --select N` picks a take.
+12. **Conform** (editor): once takes are linked, **Conform to takes** in the Shot Board (agent tool
+   `conform_to_takes`) sets each linked clip to the take's real length — or its review trim range —
+   and ripples the SHOTS track and scene markers. It overwrites manual trims on those clips, so say
+   so first; it is one undo step. The scene strip (agent `get_scene_runtimes`) shows timeline vs
+   script-estimated seconds per scene — report scenes drifting more than 20 %.
 
 ## CLI alternative
 

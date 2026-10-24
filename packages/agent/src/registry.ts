@@ -22,6 +22,8 @@ import {
   GENERATION_TARGETS,
   SHOT_STATUSES,
   applyProductionManifest,
+  conformScriptTimeline,
+  sceneRuntimes,
   buildShotPrompt,
   getGenerationTarget,
   recordProductionTake,
@@ -16011,6 +16013,48 @@ const TOOLS: RegisteredTool[] = [
       } catch (error) {
         return fail(error instanceof Error ? error.message : String(error), "INVALID_PARAMS");
       }
+    },
+  },
+  {
+    name: "get_scene_runtimes",
+    domain: "project",
+    title: "Scene runtimes",
+    description:
+      "Per scene of an imported screenplay: script-estimated seconds, current timeline seconds on the SHOTS track, shot count and how many shots have a linked take. Use it to report runtime drift before or after conform_to_takes.",
+    inputSchema: obj({}),
+    readOnly: true,
+    destructive: false,
+    expensive: false,
+    handler: async (_args, host) => {
+      host.requireOpenProject();
+      const runtimes = sceneRuntimes(host.getProject());
+      if (!runtimes.length) return fail("No script shots on the timeline. Use import_script first.", "INVALID_PARAMS");
+      const total = runtimes.reduce((sum, r) => ({ estimated: sum.estimated + r.estimated, actual: sum.actual + r.actual }), { estimated: 0, actual: 0 });
+      return ok(`${runtimes.length} scenes, ${total.actual.toFixed(1)}s on timeline vs ${total.estimated.toFixed(1)}s estimated`, { runtimes, total });
+    },
+  },
+  {
+    name: "conform_to_takes",
+    domain: "project",
+    title: "Conform shots to takes",
+    description:
+      "Resize every SHOTS clip that has a linked take to the take's real length (or its review trim range) and ripple the SHOTS track and scene markers. Overwrites manual trims on those clips; one undo step. Returns the shot ids that changed.",
+    inputSchema: obj({}),
+    readOnly: false,
+    destructive: false,
+    expensive: false,
+    handler: async (_args, host) => {
+      host.requireOpenProject();
+      const { project, conformed } = conformScriptTimeline(host.getProject());
+      if (!conformed.length) return ok("Nothing to conform", { conformed });
+      const result = await host.applyAction({
+        type: "project/applyEditSnapshot",
+        id: `conform-takes-${Date.now()}`,
+        timestamp: Date.now(),
+        params: { snapshot: structuredClone(editSnapshot(project)) },
+      } as Action);
+      if (!result.success) return fail(result.error?.message ?? "Failed to conform");
+      return ok(`Conformed ${conformed.length} shots to their takes`, { conformed, runtimes: sceneRuntimes(project) });
     },
   },
 

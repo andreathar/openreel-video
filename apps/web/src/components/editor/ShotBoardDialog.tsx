@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clapperboard, Copy, Download, FolderSync, Upload } from "@/icons/lucide-compat";
+import { Clapperboard, Copy, Download, FolderSync, Scissors, Upload } from "@/icons/lucide-compat";
 import {
   GENERATION_TARGETS,
   SHOT_STATUSES,
   applyProductionManifest,
   buildShotPrompt,
+  conformScriptTimeline,
   getGenerationTarget,
   parseProductionManifest,
+  sceneRuntimes,
   serializeProductionManifest,
   updateProductionShot,
   validateShotTarget,
@@ -54,6 +56,32 @@ const STATUS_COLORS: Record<ShotStatus, string> = {
 };
 
 const ALL = "all";
+
+/**
+ * Replaces placeholder lengths with the linked takes' real lengths (and their
+ * review trims) and ripples the SHOTS track. One undo step.
+ */
+async function conformToTakes(): Promise<void> {
+  const store = useProjectStore.getState();
+  const { project, conformed } = conformScriptTimeline(store.getFullProject());
+  if (!conformed.length) {
+    toast.info("Nothing to conform", "No shot has a linked take whose length or trim differs from the timeline.");
+    return;
+  }
+  const result = await store.executeAction({
+    type: "project/applyEditSnapshot",
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    params: { snapshot: cloneEditSnapshot(editSnapshot(project)) },
+  });
+  if (result.success) toast.success("Conformed to takes", `${conformed.length} shot${conformed.length === 1 ? "" : "s"} updated · undo to revert`);
+  else toast.error("Could not conform", result.error?.message ?? "Timeline update failed");
+}
+
+function formatDrift(seconds: number): string {
+  const rounded = Math.round(seconds * 10) / 10;
+  return `${rounded > 0 ? "+" : ""}${rounded.toFixed(1)}s`;
+}
 
 async function saveProduction(production: ProductionManifest): Promise<boolean> {
   const store = useProjectStore.getState();
@@ -198,6 +226,11 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
     [production, scene, status, targetFilter],
   );
   const selected = production?.shots.find((s) => s.id === selectedId) ?? shots[0];
+  const timeline = useProjectStore((state) => (isOpen ? state.project.timeline : undefined));
+  const runtimes = useMemo(
+    () => (production && timeline ? sceneRuntimes(useProjectStore.getState().getFullProject()) : []),
+    [production, timeline],
+  );
   const counts = useMemo(() => {
     const map = new Map<ShotStatus, number>();
     for (const s of production?.shots ?? []) map.set(s.status, (map.get(s.status) ?? 0) + 1);
@@ -294,6 +327,8 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
                       await navigator.clipboard.writeText(taskListByTarget(production, shots));
                       toast.success("Tasks copied", `${shots.length} shots grouped by generator`);
                     }} />
+                  <Button label="Conform to takes" size="sm" variant="secondary" icon={<Scissors size={14} aria-hidden />}
+                    onClick={() => void conformToTakes()} />
                   <Button label="production.json" size="sm" variant="secondary" icon={<Download size={14} aria-hidden />}
                     onClick={() => downloadText(serializeProductionManifest(production), `${production.projectCode}_production.json`, "application/json")} />
                   <Button label="Import" size="sm" variant="ghost" icon={<Upload size={14} aria-hidden />} onClick={handleImport} />
@@ -311,6 +346,32 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
                     </>
                   )}
                 </div>
+
+                {runtimes.length > 0 && (
+                  <div className="flex gap-1.5 overflow-x-auto text-[11px] custom-scrollbar" aria-label="Scene runtimes">
+                    {runtimes.map((r) => {
+                      const drift = r.actual - r.estimated;
+                      return (
+                        <button
+                          key={r.sceneCode}
+                          type="button"
+                          className={`shrink-0 rounded border px-2 py-1 text-left ${scene === r.sceneCode ? "border-primary" : "border-border"}`}
+                          title={`${r.heading}\nScript estimate ${r.estimated.toFixed(1)}s · timeline ${r.actual.toFixed(1)}s · ${r.linked}/${r.shots} shots with takes`}
+                          onClick={() => setScene(scene === r.sceneCode ? ALL : r.sceneCode)}
+                        >
+                          <span className="font-medium">{r.sceneCode}</span>{" "}
+                          <span className="tabular-nums text-text-secondary">{r.actual.toFixed(1)}s</span>{" "}
+                          {Math.abs(drift) >= 0.05 && (
+                            <span className="tabular-nums" style={{ color: Math.abs(drift) > r.estimated * 0.2 ? "#ef4444" : "#f59e0b" }}>
+                              {formatDrift(drift)}
+                            </span>
+                          )}
+                          <span className="ml-1 text-text-muted">{r.linked}/{r.shots}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 <div className="flex min-h-0 flex-1 gap-3">
                   <div className="min-w-0 flex-1 overflow-auto rounded-lg border border-border custom-scrollbar">

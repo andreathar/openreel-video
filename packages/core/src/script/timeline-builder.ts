@@ -1,7 +1,7 @@
 import type { MediaItem, Project } from "../types/project";
 import type { Clip, Marker, Track } from "../types/timeline";
 import type { PlannedScene, PlannedShot, ProductionBreakdown } from "./shots";
-import { mergeProductionManifest, type ProductionManifest, type ShotStatus } from "./production";
+import { linkedTake, mergeProductionManifest, type ProductionManifest, type ShotStatus } from "./production";
 
 /**
  * Turns a production breakdown into timeline content: one scene-range marker
@@ -170,4 +170,111 @@ export function applyProductionManifest(project: Project, production: Production
     };
   });
   return { ...project, modifiedAt: Date.now(), production, timeline: { ...project.timeline, tracks } };
+}
+
+export interface SceneRuntime {
+  readonly sceneCode: string;
+  readonly heading: string;
+  /** Sum of the planned shot lengths (script estimate). */
+  readonly estimated: number;
+  /** Sum of the SHOTS clip lengths currently on the timeline. */
+  readonly actual: number;
+  readonly shots: number;
+  /** Shots whose clip shows a real take instead of a placeholder. */
+  readonly linked: number;
+}
+
+/** Estimated vs actual runtime per scene, in script order. */
+export function sceneRuntimes(project: Project): SceneRuntime[] {
+  const production = project.production;
+  const track = project.timeline.tracks.find((t) => t.id === SCRIPT_SHOTS_TRACK_ID);
+  if (!production || !track) return [];
+  const clipOf = new Map(track.clips.map((c) => [(c.metadata?.script as ScriptShotClipMetadata | undefined)?.shotId, c]));
+  const placeholder = new Set(project.mediaLibrary.items.filter((m) => m.isPlaceholder).map((m) => m.id));
+  const scenes = new Map<string, { heading: string; estimated: number; actual: number; shots: number; linked: number }>();
+  for (const shot of production.shots) {
+    if (shot.orphaned) continue;
+    const scene = scenes.get(shot.sceneCode) ?? { heading: shot.heading, estimated: 0, actual: 0, shots: 0, linked: 0 };
+    const clip = clipOf.get(shot.id);
+    scene.estimated += shot.seconds;
+    scene.actual += clip?.duration ?? 0;
+    scene.shots++;
+    if (clip && !placeholder.has(clip.mediaId)) scene.linked++;
+    scenes.set(shot.sceneCode, scene);
+  }
+  return [...scenes].map(([sceneCode, s]) => ({
+    sceneCode,
+    ...s,
+    estimated: round(s.estimated),
+    actual: round(s.actual),
+  }));
+}
+
+export interface ConformResult {
+  readonly project: Project;
+  /** Shots whose clip length or trim changed. */
+  readonly conformed: readonly string[];
+}
+
+/**
+ * Fits the SHOTS track to the real takes: each clip showing a downloaded take
+ * gets that take's length, trimmed to the review's usable range when one was
+ * suggested; placeholders keep their planned length. Clips are then laid end
+ * to end in their current order and the scene markers follow, so the timeline
+ * shows the film's actual runtime. Other tracks are not touched.
+ */
+export function conformScriptTimeline(project: Project): ConformResult {
+  const track = project.timeline.tracks.find((t) => t.id === SCRIPT_SHOTS_TRACK_ID);
+  if (!track || track.clips.length === 0) return { project, conformed: [] };
+  const media = new Map(project.mediaLibrary.items.map((m) => [m.id, m]));
+  const shots = new Map((project.production?.shots ?? []).map((s) => [s.id, s]));
+  const ordered = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+  const conformed: string[] = [];
+  const sceneRanges = new Map<string, { start: number; end: number }>();
+  let cursor = ordered[0].startTime;
+  const clips = ordered.map((clip) => {
+    const script = clip.metadata?.script as ScriptShotClipMetadata | undefined;
+    const item = media.get(clip.mediaId);
+    const length = item && !item.isPlaceholder ? item.metadata.duration : 0;
+    let { inPoint, outPoint } = clip;
+    if (script && length > 0) {
+      const shot = shots.get(script.shotId);
+      const review = shot && linkedTake(shot)?.review;
+      inPoint = Math.min(review?.trimIn ?? 0, length);
+      outPoint = Math.min(review?.trimOut ?? length, length);
+      if (outPoint <= inPoint) [inPoint, outPoint] = [0, length];
+    }
+    const duration = round(outPoint - inPoint);
+    const changed = clip.startTime !== cursor || clip.inPoint !== inPoint || clip.outPoint !== outPoint || clip.duration !== duration;
+    if (changed && script && (clip.duration !== duration || clip.inPoint !== inPoint)) conformed.push(script.shotId);
+    const next: Clip = changed ? { ...clip, startTime: round(cursor), inPoint, outPoint, duration } : clip;
+    if (script) {
+      const range = sceneRanges.get(script.sceneCode);
+      sceneRanges.set(script.sceneCode, { start: range?.start ?? next.startTime, end: next.startTime + duration });
+    }
+    cursor += duration;
+    return next;
+  });
+  const unchanged = clips.every((c, i) => c === ordered[i]);
+  if (unchanged) return { project, conformed: [] };
+  const markers = project.timeline.markers.map((marker) => {
+    const range = marker.id.startsWith(SCRIPT_SCENE_MARKER_PREFIX)
+      ? sceneRanges.get(marker.id.slice(SCRIPT_SCENE_MARKER_PREFIX.length))
+      : undefined;
+    return range ? { ...marker, time: round(range.start), duration: round(range.end - range.start) } : marker;
+  });
+  const tracks = project.timeline.tracks.map((t) => (t.id === SCRIPT_SHOTS_TRACK_ID ? { ...t, clips } : t));
+  const end = Math.max(...tracks.flatMap((t) => t.clips.map((c) => c.startTime + c.duration)), 0);
+  return {
+    project: {
+      ...project,
+      modifiedAt: Date.now(),
+      timeline: { ...project.timeline, tracks, markers, duration: Math.max(end, round(cursor)) },
+    },
+    conformed,
+  };
+}
+
+function round(seconds: number): number {
+  return Math.round(seconds * 1000) / 1000;
 }

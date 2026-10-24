@@ -11,6 +11,7 @@ import {
   parseProductionManifest,
   recordProductionTake,
   serializeProductionManifest,
+  setTakeReview,
   suggestTargets,
   updateProductionShot,
   upsertProductionEntity,
@@ -18,7 +19,15 @@ import {
   type ProductionManifest,
 } from "./production";
 import { planProduction } from "./shots";
-import { SCRIPT_SHOTS_TRACK_ID, applyProductionManifest, buildScriptTimeline } from "./timeline-builder";
+import {
+  SCRIPT_SCENE_MARKER_PREFIX,
+  SCRIPT_SHOT_MEDIA_PREFIX,
+  SCRIPT_SHOTS_TRACK_ID,
+  applyProductionManifest,
+  buildScriptTimeline,
+  conformScriptTimeline,
+  sceneRuntimes,
+} from "./timeline-builder";
 
 const SCRIPT = `Title: The Heist
 
@@ -184,5 +193,49 @@ describe("folder sync", () => {
     expect(reverse.shots[0].prompt).toBe("local prompt");
     expect(reverse.shots[0].takes[0].generationId).toBe("g1");
     expect(reverse.entities.find((e) => e.code === "HSTL-CHR-MARA")?.kling?.elementId).toBe("9");
+  });
+});
+
+describe("conform to takes", () => {
+  /** Built timeline with HSTL_S001_SH01 linked to a 12s take. */
+  function linked(trim?: { trimIn?: number; trimOut?: number }) {
+    let project = buildScriptTimeline(emptyProject(), plan);
+    let production = registerTakeFile(project.production!, "shots/S001/HSTL_S001_SH01_kl-v4_T01.mp4").manifest;
+    if (trim) {
+      production = setTakeReview(production, "HSTL_S001_SH01", 1, { score: 6, issues: [], model: "test", reviewedAt: 1, ...trim });
+    }
+    project = applyProductionManifest(project, production);
+    const mediaId = SCRIPT_SHOT_MEDIA_PREFIX + "HSTL_S001_SH01";
+    const items = project.mediaLibrary.items.map((m) =>
+      m.id === mediaId ? { ...m, isPlaceholder: false, metadata: { ...m.metadata, duration: 12 } } : m,
+    );
+    return { ...project, mediaLibrary: { items } };
+  }
+  const shots = (p: Project) => p.timeline.tracks.find((t) => t.id === SCRIPT_SHOTS_TRACK_ID)!.clips;
+
+  it("uses the real take length and ripples later shots and scene markers", () => {
+    const before = linked();
+    const estimated = shots(before)[0].duration;
+    const { project, conformed } = conformScriptTimeline(before);
+    expect(conformed).toEqual(["HSTL_S001_SH01"]);
+    const clips = shots(project);
+    expect(clips[0]).toMatchObject({ duration: 12, inPoint: 0, outPoint: 12 });
+    expect(clips[1].startTime).toBeCloseTo(shots(before)[1].startTime + 12 - estimated);
+    for (let i = 1; i < clips.length; i++) expect(clips[i].startTime).toBeCloseTo(clips[i - 1].startTime + clips[i - 1].duration);
+    const scene2 = project.timeline.markers.find((m) => m.id === SCRIPT_SCENE_MARKER_PREFIX + "S002");
+    expect(scene2?.time).toBeCloseTo(clips.find((c) => (c.metadata?.script as { sceneCode: string }).sceneCode === "S002")!.startTime);
+  });
+
+  it("applies the review trim and reports per-scene drift", () => {
+    const { project } = conformScriptTimeline(linked({ trimIn: 1.5, trimOut: 9 }));
+    expect(shots(project)[0]).toMatchObject({ inPoint: 1.5, outPoint: 9, duration: 7.5 });
+    const s1 = sceneRuntimes(project)[0];
+    expect(s1.linked).toBe(1);
+    expect(s1.actual - s1.estimated).toBeCloseTo(7.5 - shots(linked())[0].duration);
+  });
+
+  it("is a no-op when nothing is linked", () => {
+    const project = buildScriptTimeline(emptyProject(), plan);
+    expect(conformScriptTimeline(project)).toEqual({ project, conformed: [] });
   });
 });
