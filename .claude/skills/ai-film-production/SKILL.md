@@ -84,6 +84,15 @@ that is why every submission must be recorded with `prod record` immediately, be
    and ripples the SHOTS track and scene markers. It overwrites manual trims on those clips, so say
    so first; it is one undo step. The scene strip (agent `get_scene_runtimes`) shows timeline vs
    script-estimated seconds per scene — report scenes drifting more than 20 %.
+13. **Dialogue** (editor): **Check dialogue** transcribes linked takes with the in-browser Whisper
+   and marks each take with how many script lines were heard (`lines N%`); a take below 100 % may
+   have dropped or garbled a line — tell the user which. **Assemble audio** moves each take's sound
+   to DIALOGUE A/B tracks (alternating), mutes the picture, and lets sound cross a cut by 0.5 s
+   (J/L cut) where the line touches the edge and the take has spare source. Re-run it after a
+   conform; it rebuilds the dialogue tracks. Both are one undo step.
+14. **Finish**: **EDL** in the Shot Board (agent `export_script_edl`, optional `sceneCode`) gives a
+   CMX3600 EDL; in Resolve, import it with the `shots/` folder as the media location. Shots without
+   a take appear as black events so the cut keeps its length.
 
 ## CLI alternative
 

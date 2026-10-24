@@ -156,6 +156,25 @@ export interface ProductionTake {
   /** Project-folder-relative path of the downloaded file. */
   readonly localPath?: string;
   readonly review?: TakeReview;
+  readonly speech?: TakeSpeech;
+}
+
+/** A Whisper segment, in seconds from the start of the take file. */
+export interface SpeechSegment {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}
+
+/** Local Whisper transcript of a take, checked against the shot's script dialogue. */
+export interface TakeSpeech {
+  readonly segments: readonly SpeechSegment[];
+  /** Share (0–1) of the scripted dialogue words heard in the take; 1 when the shot has no dialogue. */
+  readonly coverage: number;
+  /** Scripted lines that were not heard ("CHARACTER: text"). */
+  readonly missing: readonly string[];
+  readonly model: string;
+  readonly transcribedAt: number;
 }
 
 /** Automatic quality check of a downloaded take (local VLM or Claude). */
@@ -176,6 +195,8 @@ export interface ProductionShot {
   readonly heading: string;
   readonly seconds: number;
   readonly description: string;
+  /** Scripted dialogue lines, used to check takes' speech. */
+  readonly dialogue?: readonly { readonly character: string; readonly text: string }[];
   /** Entity codes appearing in the shot. */
   readonly entities: readonly string[];
   readonly refs: ShotReferences;
@@ -246,6 +267,7 @@ export function mergeProductionManifest(
         heading: scene.heading,
         seconds: planned.seconds,
         description: planned.description,
+        ...(planned.dialogue.length ? { dialogue: planned.dialogue } : {}),
         entities: [...scripted, ...kept],
         refs: before?.refs ?? EMPTY_REFS,
         targetId: before?.targetId ?? defaultTargetId,
@@ -522,9 +544,15 @@ function mergeTakes(a: readonly ProductionTake[], b: readonly ProductionTake[]):
       localPath: high.localPath ?? low.localPath,
       generationId: high.generationId ?? low.generationId,
       review: newerReview(high.review, low.review),
+      speech: newerSpeech(high.speech, low.speech),
     });
   }
   return [...byNumber.values()].sort((x, y) => x.take - y.take);
+}
+
+function newerSpeech(a?: TakeSpeech, b?: TakeSpeech): TakeSpeech | undefined {
+  if (!a || !b) return a ?? b;
+  return a.transcribedAt >= b.transcribedAt ? a : b;
 }
 
 function newerReview(a?: TakeReview, b?: TakeReview): TakeReview | undefined {
@@ -537,6 +565,53 @@ export function setTakeReview(manifest: ProductionManifest, shotId: string, take
   const shot = manifest.shots.find((s) => s.id === shotId);
   if (!shot?.takes.some((t) => t.take === take)) throw new Error(`Unknown take ${shotId} T${take}`);
   return withShot(manifest, shotId, (s) => ({ ...s, takes: s.takes.map((t) => (t.take === take ? { ...t, review } : t)) }));
+}
+
+export function setTakeSpeech(manifest: ProductionManifest, shotId: string, take: number, speech: TakeSpeech): ProductionManifest {
+  const shot = manifest.shots.find((s) => s.id === shotId);
+  if (!shot?.takes.some((t) => t.take === take)) throw new Error(`Unknown take ${shotId} T${take}`);
+  return withShot(manifest, shotId, (s) => ({ ...s, takes: s.takes.map((t) => (t.take === take ? { ...t, speech } : t)) }));
+}
+
+/**
+ * Compares a take's transcript with the shot's scripted lines. A line counts
+ * as heard when at least 60 % of its words occur in the transcript — AI
+ * voices often paraphrase, so exact matching would flag everything.
+ */
+export function checkTakeDialogue(
+  shot: Pick<ProductionShot, "dialogue">,
+  segments: readonly SpeechSegment[],
+  model: string,
+): TakeSpeech {
+  const heard = new Set(words(segments.map((s) => s.text).join(" ")));
+  let total = 0;
+  let matched = 0;
+  const missing: string[] = [];
+  for (const line of shot.dialogue ?? []) {
+    const lineWords = words(line.text);
+    if (!lineWords.length) continue;
+    const hits = lineWords.filter((w) => heard.has(w)).length;
+    total += lineWords.length;
+    matched += hits;
+    if (hits / lineWords.length < 0.6) missing.push(`${line.character}: ${line.text}`);
+  }
+  return {
+    segments: segments.map((s) => ({ start: s.start, end: s.end, text: s.text.trim() })).filter((s) => s.text),
+    coverage: total ? Math.round((matched / total) * 100) / 100 : 1,
+    missing,
+    model,
+    transcribedAt: Date.now(),
+  };
+}
+
+function words(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/[^\p{L}\p{N}']+/u)
+    .map((w) => w.replace(/^'+|'+$/g, ""))
+    .filter(Boolean);
 }
 
 /**

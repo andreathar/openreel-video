@@ -3,6 +3,7 @@ import type { Project } from "../types/project";
 import { parseFountain } from "./fountain";
 import {
   buildShotPrompt,
+  checkTakeDialogue,
   getGenerationTarget,
   linkedTake,
   mergeProductionManifest,
@@ -12,12 +13,15 @@ import {
   recordProductionTake,
   serializeProductionManifest,
   setTakeReview,
+  setTakeSpeech,
   suggestTargets,
   updateProductionShot,
   upsertProductionEntity,
   validateShotTarget,
   type ProductionManifest,
 } from "./production";
+import { SCRIPT_DIALOGUE_TRACK_IDS, assembleDialogue } from "./assemble";
+import { buildScriptEdl, framesToTimecode } from "./edl";
 import { planProduction } from "./shots";
 import {
   SCRIPT_SCENE_MARKER_PREFIX,
@@ -237,5 +241,103 @@ describe("conform to takes", () => {
   it("is a no-op when nothing is linked", () => {
     const project = buildScriptTimeline(emptyProject(), plan);
     expect(conformScriptTimeline(project)).toEqual({ project, conformed: [] });
+  });
+});
+
+describe("dialogue check", () => {
+  const shot = manifest().shots.find((s) => s.dialogue?.length)!;
+
+  it("keeps scripted lines on the shot", () => {
+    expect(shot.dialogue).toEqual([{ character: "MARA", text: "Three minutes." }]);
+  });
+
+  it("accepts paraphrase and flags missing lines", () => {
+    const heard = checkTakeDialogue(shot, [{ start: 0.4, end: 1.2, text: " Three minutes left." }], "whisper");
+    expect(heard).toMatchObject({ coverage: 1, missing: [] });
+    expect(heard.segments).toEqual([{ start: 0.4, end: 1.2, text: "Three minutes left." }]);
+    const silent = checkTakeDialogue(shot, [], "whisper");
+    expect(silent).toMatchObject({ coverage: 0, missing: ["MARA: Three minutes."] });
+    expect(checkTakeDialogue({}, [], "whisper").coverage).toBe(1);
+  });
+});
+
+describe("EDL export", () => {
+  it("formats non-drop timecode", () => {
+    expect(framesToTimecode(30 * 3600 + 30 * 61 + 5, 30)).toBe("01:01:01:05");
+  });
+
+  it("writes one event per shot with clip names and placeholders as black", () => {
+    let project = buildScriptTimeline(emptyProject(), plan);
+    const production = registerTakeFile(project.production!, "shots/S001/HSTL_S001_SH01_kl-v4_T01.mp4").manifest;
+    project = applyProductionManifest(project, production);
+    const mediaId = SCRIPT_SHOT_MEDIA_PREFIX + "HSTL_S001_SH01";
+    project = {
+      ...project,
+      mediaLibrary: {
+        items: project.mediaLibrary.items.map((m) =>
+          m.id === mediaId ? { ...m, name: "HSTL_S001_SH01_kl-v4_T01.mp4", isPlaceholder: false } : m,
+        ),
+      },
+    };
+    const edl = buildScriptEdl(project);
+    const clips = project.timeline.tracks.find((t) => t.id === SCRIPT_SHOTS_TRACK_ID)!.clips;
+    expect(edl.events).toBe(clips.length);
+    expect(edl.text).toContain("FCM: NON-DROP FRAME");
+    expect(edl.text).toMatch(/^001  AX {7}V {5}C {8}00:00:00:00 \S+ 01:00:00:00 /m);
+    expect(edl.text).toContain("* FROM CLIP NAME: HSTL_S001_SH01_kl-v4_T01.mp4");
+    expect(edl.placeholders).not.toContain("HSTL_S001_SH01");
+    expect(edl.placeholders.length).toBe(clips.length - 1);
+
+    const scene2 = buildScriptEdl(project, { sceneCode: "S002" });
+    expect(scene2.text).toMatch(/^001  BL .* 01:00:00:00 /m);
+    expect(scene2.text).toContain("TITLE: Test S002");
+  });
+});
+
+describe("dialogue assembly", () => {
+  /** Every shot linked to a 12s take trimmed to 2–8s, with speech at the given range. */
+  function linkedAll(speech: { start: number; end: number }) {
+    let project = buildScriptTimeline(emptyProject(), plan);
+    let production = project.production!;
+    for (const shot of production.shots) {
+      production = registerTakeFile(production, `shots/${shot.sceneCode}/${shot.id}_kl-v4_T01.mp4`).manifest;
+      production = setTakeReview(production, shot.id, 1, { score: 7, issues: [], model: "t", reviewedAt: 1, trimIn: 2, trimOut: 8 });
+      production = setTakeSpeech(production, shot.id, 1, { segments: [{ ...speech, text: "line" }], coverage: 1, missing: [], model: "t", transcribedAt: 1 });
+    }
+    project = applyProductionManifest(project, production);
+    const items = project.mediaLibrary.items.map((m) =>
+      m.id.startsWith(SCRIPT_SHOT_MEDIA_PREFIX) ? { ...m, isPlaceholder: false, metadata: { ...m.metadata, duration: 12 } } : m,
+    );
+    project = conformScriptTimeline({ ...project, mediaLibrary: { items } }).project;
+    const audio = new Map(production.shots.map((s) => [s.id, `audio-${s.id}`]));
+    return { project, audio };
+  }
+  const shotClips = (p: Project) => p.timeline.tracks.find((t) => t.id === SCRIPT_SHOTS_TRACK_ID)!.clips;
+  const dialogue = (p: Project) => p.timeline.tracks.filter((t) => (SCRIPT_DIALOGUE_TRACK_IDS as readonly string[]).includes(t.id));
+
+  it("moves sound to alternating dialogue tracks and mutes picture", () => {
+    const { project: before, audio } = linkedAll({ start: 4, end: 5 });
+    const { project, placed, jCuts, lCuts } = assembleDialogue(before, audio);
+    expect(placed.length).toBe(shotClips(before).length);
+    expect(jCuts).toEqual([]);
+    expect(lCuts).toEqual([]);
+    expect(shotClips(project).every((c) => c.volume === 0)).toBe(true);
+    const [a, b] = dialogue(project);
+    expect(a.role).toBe("dialogue");
+    expect(a.clips[0]).toMatchObject({ mediaId: `audio-${placed[0]}`, startTime: 0, inPoint: 2, outPoint: 8 });
+    expect(b.clips[0]?.mediaId).toBe(`audio-${placed[1]}`);
+    expect(assembleDialogue(project, audio).project.timeline.tracks.length).toBe(project.timeline.tracks.length);
+  });
+
+  it("crosses cuts where speech touches the edge and source has handles", () => {
+    const { project: before, audio } = linkedAll({ start: 2.1, end: 7.9 });
+    const { project, jCuts, lCuts, placed } = assembleDialogue(before, audio, { overlap: 0.5 });
+    expect(jCuts).toEqual(placed.slice(1));
+    expect(lCuts).toEqual(placed.slice(0, -1));
+    const second = dialogue(project)[1].clips[0];
+    const cut = shotClips(project)[1].startTime;
+    expect(second.startTime).toBeCloseTo(cut - 0.5);
+    expect(second.inPoint).toBe(1.5);
+    expect(dialogue(project)[0].clips[0]).toMatchObject({ startTime: 0, inPoint: 2, outPoint: 8.5 });
   });
 });

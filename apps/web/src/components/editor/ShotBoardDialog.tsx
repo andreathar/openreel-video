@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clapperboard, Copy, Download, FolderSync, Scissors, Upload } from "@/icons/lucide-compat";
+import { AudioLines, Clapperboard, Copy, Download, FileText, FolderSync, Mic, Scissors, Upload } from "@/icons/lucide-compat";
 import {
   GENERATION_TARGETS,
   SHOT_STATUSES,
   applyProductionManifest,
+  buildScriptEdl,
   buildShotPrompt,
   conformScriptTimeline,
   getGenerationTarget,
@@ -102,6 +103,74 @@ async function saveProduction(production: ProductionManifest): Promise<boolean> 
   return true;
 }
 
+/** One EDL for the whole SHOTS track, or just the filtered scene. */
+function exportEdl(sceneCode?: string): void {
+  const project = useProjectStore.getState().getFullProject();
+  const edl = buildScriptEdl(project, sceneCode ? { sceneCode } : {});
+  const code = project.production?.projectCode ?? "SHOTS";
+  downloadText(edl.text, `${code}${sceneCode ? `_${sceneCode}` : ""}.edl`, "text/plain");
+  if (edl.placeholders.length) {
+    toast.info("EDL exported", `${edl.events} events · ${edl.placeholders.length} shot(s) without a take exported as black`);
+  } else toast.success("EDL exported", `${edl.events} events`);
+}
+
+/**
+ * Puts the linked takes' sound on two DIALOGUE tracks with J/L cuts where
+ * speech touches a cut, and mutes the picture clips. One undo step.
+ */
+async function assembleDialogueTracks(sceneCode: string | undefined, setBusy: (message: string | null) => void): Promise<void> {
+  const store = useProjectStore.getState();
+  setBusy("Extracting audio…");
+  try {
+    const { assembleSceneDialogue } = await import("../../services/scene-assembly");
+    const result = await assembleSceneDialogue(store.getFullProject(), { sceneCode, onStatus: setBusy });
+    if (!result.placed.length) {
+      toast.info("Nothing to assemble", "No shot has a loaded take with sound");
+      return;
+    }
+    const applied = await store.executeAction({
+      type: "project/applyEditSnapshot",
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      params: { snapshot: cloneEditSnapshot(editSnapshot(result.project)) },
+    });
+    if (!applied.success) throw new Error(applied.error?.message ?? "Timeline update failed");
+    toast.success("Dialogue assembled", `${result.placed.length} shot(s) · ${result.jCuts.length} J-cut · ${result.lCuts.length} L-cut · undo to revert`);
+  } catch (error) {
+    toast.error("Could not assemble dialogue", error instanceof Error ? error.message : String(error));
+  } finally {
+    setBusy(null);
+  }
+}
+
+/** Whisper-checks the linked takes of the given shots against their scripted lines. */
+async function checkDialogue(shotIds: readonly string[], setBusy: (message: string | null) => void): Promise<void> {
+  const store = useProjectStore.getState();
+  const production = store.project.production;
+  if (!production) return;
+  setBusy("Loading Whisper…");
+  try {
+    const { checkShotDialogue } = await import("../../services/take-dialogue");
+    const result = await checkShotDialogue(production, store.project.mediaLibrary.items, shotIds, { onStatus: setBusy });
+    if (!result.checked.length) {
+      toast.info("Nothing to check", result.skipped.length
+        ? `${result.skipped.length} shot(s) with dialogue have no loaded take`
+        : "None of these shots has scripted dialogue");
+      return;
+    }
+    await saveProduction(result.manifest);
+    const missing = result.checked.filter((id) => {
+      const shot = result.manifest.shots.find((s) => s.id === id);
+      return shot?.takes.some((t) => t.speech?.missing.length);
+    });
+    toast.success("Dialogue checked", `${result.checked.length} take(s) · ${missing.length} with missing lines`);
+  } catch (error) {
+    toast.error("Dialogue check failed", error instanceof Error ? error.message : String(error));
+  } finally {
+    setBusy(null);
+  }
+}
+
 function downloadText(text: string, fileName: string, type: string): void {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const link = document.createElement("a");
@@ -153,6 +222,7 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
   const [folderName, setFolderName] = useState<string | null>(null);
   const [folderReady, setFolderReady] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [dialogueBusy, setDialogueBusy] = useState<string | null>(null);
   const syncing = useRef(false);
 
   const runSync = useCallback(
@@ -329,6 +399,14 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
                     }} />
                   <Button label="Conform to takes" size="sm" variant="secondary" icon={<Scissors size={14} aria-hidden />}
                     onClick={() => void conformToTakes()} />
+                  <Button label={dialogueBusy ?? "Check dialogue"} size="sm" variant="secondary" icon={<Mic size={14} aria-hidden />}
+                    disabled={dialogueBusy !== null}
+                    onClick={() => void checkDialogue(shots.map((s) => s.id), setDialogueBusy)} />
+                  <Button label={dialogueBusy ?? (scene === ALL ? "Assemble audio" : `Assemble audio ${scene}`)} size="sm" variant="secondary"
+                    icon={<AudioLines size={14} aria-hidden />} disabled={dialogueBusy !== null}
+                    onClick={() => void assembleDialogueTracks(scene === ALL ? undefined : scene, setDialogueBusy)} />
+                  <Button label={scene === ALL ? "EDL" : `EDL ${scene}`} size="sm" variant="secondary" icon={<FileText size={14} aria-hidden />}
+                    onClick={() => exportEdl(scene === ALL ? undefined : scene)} />
                   <Button label="production.json" size="sm" variant="secondary" icon={<Download size={14} aria-hidden />}
                     onClick={() => downloadText(serializeProductionManifest(production), `${production.projectCode}_production.json`, "application/json")} />
                   <Button label="Import" size="sm" variant="ghost" icon={<Upload size={14} aria-hidden />} onClick={handleImport} />
@@ -512,6 +590,20 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
                                     .join("\n")}
                                 >
                                   {take.review.score}/10{take.review.issues[0] ? ` · ${take.review.issues[0]}` : ""}
+                                </span>
+                              )}
+                              {take.speech && (
+                                <span
+                                  className="truncate"
+                                  style={{ color: reviewColor(take.speech.coverage * 10) }}
+                                  title={[
+                                    `Transcribed by ${take.speech.model}`,
+                                    ...take.speech.segments.map((seg) => `${seg.start.toFixed(1)}–${seg.end.toFixed(1)}s ${seg.text}`),
+                                    ...take.speech.missing.map((line) => `Missing: ${line}`),
+                                  ].join("\n")}
+                                >
+                                  lines {Math.round(take.speech.coverage * 100)}%
+                                  {take.speech.missing[0] ? ` · missing ${take.speech.missing[0]}` : ""}
                                 </span>
                               )}
                             </div>

@@ -22,6 +22,7 @@ import {
   GENERATION_TARGETS,
   SHOT_STATUSES,
   applyProductionManifest,
+  buildScriptEdl,
   conformScriptTimeline,
   sceneRuntimes,
   buildShotPrompt,
@@ -16055,6 +16056,24 @@ const TOOLS: RegisteredTool[] = [
       } as Action);
       if (!result.success) return fail(result.error?.message ?? "Failed to conform");
       return ok(`Conformed ${conformed.length} shots to their takes`, { conformed, runtimes: sceneRuntimes(project) });
+    },
+  },
+  {
+    name: "export_script_edl",
+    domain: "project",
+    title: "Export script EDL",
+    description:
+      "Build a CMX3600 EDL of the SHOTS track for finishing in DaVinci Resolve or Premiere: one event per shot in timeline order, source file names from the linked takes, shots without a take as BL (black) events. Pass sceneCode (e.g. S003) for one scene. Returns the EDL text; the user saves it as <PROJ>_<scene>.edl next to the shots folder.",
+    inputSchema: obj({ sceneCode: str }),
+    readOnly: true,
+    destructive: false,
+    expensive: false,
+    handler: async (args, host) => {
+      host.requireOpenProject();
+      const sceneCode = typeof args.sceneCode === "string" && args.sceneCode ? args.sceneCode : undefined;
+      const edl = buildScriptEdl(host.getProject(), { sceneCode });
+      if (!edl.events) return fail(sceneCode ? `No shots in scene ${sceneCode}` : "No script shots on the timeline");
+      return ok(`EDL with ${edl.events} events (${edl.placeholders} without a take)`, edl);
     },
   },
 
