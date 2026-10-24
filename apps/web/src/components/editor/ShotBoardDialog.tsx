@@ -104,6 +104,16 @@ function taskListByTarget(production: ProductionManifest, shots: readonly Produc
   return lines.join("\n");
 }
 
+function reviewColor(score: number): string {
+  return score >= 7 ? "#22c55e" : score >= 4 ? "#f59e0b" : "#ef4444";
+}
+
+/** Best local-review score among a shot's takes, if any was reviewed. */
+function bestScore(shot: ProductionShot): number | undefined {
+  const scores = shot.takes.flatMap((t) => (t.review ? [t.review.score] : []));
+  return scores.length ? Math.max(...scores) : undefined;
+}
+
 export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClose }) => {
   const production = useProjectStore((state) => (isOpen ? state.project.production : undefined));
   const [scene, setScene] = useState(ALL);
@@ -339,7 +349,14 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
                                   {shot.status}
                                 </span>
                               </td>
-                              <td className="px-3 py-1.5 tabular-nums">{shot.takes.length || ""}</td>
+                              <td className="px-3 py-1.5 tabular-nums">
+                                {shot.takes.length || ""}
+                                {bestScore(shot) !== undefined && (
+                                  <span className="ml-1" style={{ color: reviewColor(bestScore(shot)!) }} title="Best review score">
+                                    ★{bestScore(shot)}
+                                  </span>
+                                )}
+                              </td>
                               <td className="px-3 py-1.5 text-text-secondary">
                                 <span className="line-clamp-2">{shot.prompt || shot.description}</span>
                               </td>
@@ -419,6 +436,23 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
                               </button>
                               <span className="font-mono">{take.fileName}</span>
                               <span className="text-text-muted">{take.status}</span>
+                              {take.review && (
+                                <span
+                                  className="truncate"
+                                  style={{ color: reviewColor(take.review.score) }}
+                                  title={[
+                                    `Reviewed by ${take.review.model}`,
+                                    ...take.review.issues,
+                                    take.review.trimIn !== undefined || take.review.trimOut !== undefined
+                                      ? `Usable: ${take.review.trimIn ?? 0}s – ${take.review.trimOut ?? "end"}`
+                                      : "",
+                                  ]
+                                    .filter(Boolean)
+                                    .join("\n")}
+                                >
+                                  {take.review.score}/10{take.review.issues[0] ? ` · ${take.review.issues[0]}` : ""}
+                                </span>
+                              )}
                             </div>
                           ))}
                         </div>

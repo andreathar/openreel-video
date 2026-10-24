@@ -33,21 +33,27 @@ that is why every submission must be recorded with `prod record` immediately, be
 ## Workflow
 
 1. **Orient**: `prod status <folder>` (add `--status todo|prompted|queued`) and `prod entities <folder>`.
-2. **Entities first** — a shot that mentions a character without a platform element only gets text.
+2. **File new references** (local GPU, free): drop images into `refs/_inbox/`, run
+   `prod name-refs <folder>` — the local VLM proposes kind, code, description and Kling tags per
+   image in `refs/_inbox/naming.json`. Show the proposals to the user, edit wrong ones (or
+   `"skip": true`), then `prod name-refs <folder> --apply` moves them to
+   `refs/<KIND>/<CODE>/<CODE>_NN.ext` and fills the entity. Reuse its `description` and `tags`
+   for the platform element.
+3. **Entities first** — a shot that mentions a character without a platform element only gets text.
    - Kling: `file_upload` the ref images → `element_create` (name = entity code, tags e.g.
      `Characters`/`Scenes`/`Items`, cover + 1–3 secondary) → `prod entity <folder> --kind CHR --name MARA --kling-id <id>`.
    - Higgsfield: `media_upload` → PUT bytes → `media_confirm` → `manage_reference_elements action=create`
      (name = entity code) → `prod entity … --hf-id <uuid>`. Soul characters: `--soul-id <id>`.
    - Check first with `element_list` / `manage_reference_elements action=list` that the code is not
      already there; Higgsfield silently suffixes duplicates (`HSTL-CHR-MARA-2`).
-3. **Prompt**: write the visual prompt per shot (`prod set <folder> <shot> --prompt "…"`), using the
+4. **Prompt**: write the visual prompt per shot (`prod set <folder> <shot> --prompt "…"`), using the
    entity display names. `prod payload <folder> <shot>` turns names into `<<<elementId>>>` and returns
    tool, model, duration, elements JSON, reference files and `issues`. **Fix every issue before
    submitting** (too many references for the model, missing start image/video, etc.). Switch
    generator with `--target` (`prod targets` lists limits).
-4. **Ask before spending credits.** Show the user the shot list, generator and seconds (Kling bills
+5. **Ask before spending credits.** Show the user the shot list, generator and seconds (Kling bills
    per second) and get a yes. Never auto-resubmit failed jobs.
-5. **Submit** exactly what `payload` returned:
+6. **Submit** exactly what `payload` returned:
    - `kling-v4-omni` → `omni_ref_video` model `kling-video-v4_0`, arguments `prompt`, `duration`,
      `elements` (from payload), aspect/resolution from the user; reference files go in `inputs`
      after `file_upload` (`image_1…`, `video_1…`, `audio_1…`) and are named in the prompt as
@@ -60,14 +66,17 @@ that is why every submission must be recorded with `prod record` immediately, be
      `hf_mult_replace_object` with `medias` roles `image_references` and `video_references`.
    - `hf-soul-2` → `generate_image` model `soul_2` (`soul_id`, optional `style_id`; style cannot be
      combined with medias).
-6. **Record immediately**: `prod record <folder> <shot> --id <generationId|job_id> --target <id>
+7. **Record immediately**: `prod record <folder> <shot> --id <generationId|job_id> --target <id>
    --prompt "<final prompt>"`. It prints the take's file name.
-7. **Collect**: `prod pending <folder>`; poll with Kling `query_tasks` / Higgsfield `jobs_wait`
+8. **Collect**: `prod pending <folder>`; poll with Kling `query_tasks` / Higgsfield `jobs_wait`
    (≤15 s per call). On success `prod download <folder> <shot> <take> <url>` (Kling URLs expire in
    24 h — download promptly). On failure relay the exact error and `prod fail <folder> <shot> <take>`.
-8. **Files downloaded by hand**: put them in `shots/<scene>/` with the name from `record`, then
+9. **Files downloaded by hand**: put them in `shots/<scene>/` with the name from `record`, then
    `prod scan <folder>`.
-9. **Hand back to the editor**: tell the user to press **Sync** in the Shot Board (it also syncs
+10. **Review takes** (local GPU, free): `prod review <folder>` scores every unreviewed downloaded
+   take 0–10 against the shot and its entity references and suggests trims. Treat it as triage —
+   point the user at low scores, never discard or regenerate on the score alone.
+11. **Hand back to the editor**: tell the user to press **Sync** in the Shot Board (it also syncs
    every 10 s while open). The editor links the selected take — or the newest finished one — to
    the shot's placeholder clip. `prod set … --select N` picks a take.
 
@@ -76,6 +85,10 @@ that is why every submission must be recorded with `prod record` immediately, be
 `kling` and `higgsfield` CLIs (both on PATH; `hf` is the Hugging Face CLI, not Higgsfield) accept
 the same models and arguments. `higgsfield generate create … --wait` prints the job id — record it
 the same way.
+
+Local AI uses LM Studio at `http://localhost:1235/v1` with `qwen3.5-4b` (override with
+`PROD_LLM_URL`, `PROD_VLM_MODEL` or `--model`). Jobs run one at a time — the 6 GB GPU fits one
+4B vision model; unload other models in LM Studio first if `gpuPeakMiB` nears 6000.
 
 ## Don'ts
 

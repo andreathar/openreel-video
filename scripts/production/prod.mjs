@@ -9,8 +9,8 @@
 import { registerHooks } from "node:module";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -27,9 +27,11 @@ registerHooks({
 });
 
 const core = await import(new URL("../../packages/core/src/script/index.ts", import.meta.url).href);
+const localAi = await import(new URL("./local-ai.mjs", import.meta.url).href);
 
 export const MANIFEST_FILE = "production.json";
 const MEDIA = /\.(mp4|mov|webm|mkv|png|jpe?g|webp|wav|mp3|m4a)$/i;
+const IMAGE = /\.(png|jpe?g|webp)$/i;
 
 const USAGE = `Usage: prod.mjs <command> <folder> [options]
 
@@ -54,6 +56,15 @@ const USAGE = `Usage: prod.mjs <command> <folder> [options]
                                      Save a result as shots/<scene>/<take file name> and mark it done
   fail <folder> <shotId> <take>      Mark a take as failed
   scan <folder>                      Register take files already in the folder
+
+Local AI (LM Studio/Ollama, env PROD_LLM_URL=${localAi.LLM_URL} PROD_VLM_MODEL=${localAi.VLM_MODEL}):
+  name-refs <folder> [--inbox refs/_inbox] [--apply] [--model m]
+                                     Classify images in the inbox as CHR/LOC/PRP entities and write
+                                     naming proposals to <inbox>/naming.json; edit it, then --apply
+                                     moves them to refs/<KIND>/<CODE>/<CODE>_NN.ext and adds the entities
+  review <folder> [<shotId> [take]] [--frames 6] [--force] [--model m]
+                                     Score downloaded takes against the shot and its entity references
+                                     (no shot: every take not reviewed yet)
 `;
 
 function fail(message) {
@@ -104,6 +115,10 @@ async function* walk(dir, depth = 0) {
 
 function toPosix(path) {
   return path.split(sep).join("/");
+}
+
+function seconds(start) {
+  return Math.round((performance.now() - start) / 100) / 10;
 }
 
 const commands = {
@@ -280,6 +295,123 @@ const commands = {
     if (found.length) await save(folder, manifest);
     print({ registered: found });
   },
+  async "name-refs"(folder, _args, values) {
+    const inbox = resolve(folder, values.inbox ?? "refs/_inbox");
+    const proposalsPath = join(inbox, "naming.json");
+    let manifest = await load(folder);
+
+    if (values.apply) {
+      if (!existsSync(proposalsPath)) fail(`No ${proposalsPath}. Run name-refs without --apply first.`);
+      const proposals = JSON.parse(await readFile(proposalsPath, "utf8"));
+      const moved = [];
+      for (const p of proposals) {
+        if (p.skip) continue;
+        const source = join(inbox, p.file);
+        if (!existsSync(source)) {
+          console.error(`skip ${p.file}: not in the inbox any more`);
+          continue;
+        }
+        const kind = core.ENTITY_KINDS.includes(p.kind) ? p.kind : fail(`${p.file}: kind must be one of ${core.ENTITY_KINDS.join(", ")}`);
+        const code = p.code || core.elementName(manifest.projectCode, kind, p.label);
+        const dir = join(folder, "refs", kind, code);
+        await mkdir(dir, { recursive: true });
+        const taken = new Set(await readdir(dir));
+        let n = 1;
+        while ([...taken].some((f) => f.startsWith(`${code}_${String(n).padStart(2, "0")}.`))) n++;
+        const dest = join(dir, `${code}_${String(n).padStart(2, "0")}${extname(p.file).toLowerCase()}`);
+        await rename(source, dest);
+        const before = manifest.entities.find((e) => e.code === code);
+        manifest = core.upsertProductionEntity(manifest, {
+          code,
+          kind,
+          displayName: before?.displayName ?? p.label,
+          description: before?.description || p.description,
+          tags: [...new Set([...(before?.tags ?? []), ...(p.tags ?? [])])],
+          refs: [...(before?.refs ?? []), toPosix(relative(folder, dest))],
+        });
+        moved.push({ from: p.file, to: toPosix(relative(folder, dest)), entity: code });
+      }
+      await save(folder, manifest);
+      await rm(proposalsPath);
+      print({ moved });
+      return;
+    }
+
+    if (!existsSync(inbox)) fail(`No inbox folder ${inbox}. Put new reference images there.`);
+    const files = (await readdir(inbox)).filter((f) => IMAGE.test(f)).sort();
+    if (!files.length) fail(`No images in ${inbox}`);
+    const started = performance.now();
+    let peak = 0;
+    const proposals = [];
+    for (const file of files) {
+      const t0 = performance.now();
+      const image = await localAi.jpegDataUri(join(inbox, file));
+      const raw = await localAi.chat(core.toOpenAIMessages(core.buildReferenceNamingPrompt(manifest, image, file)), { model: values.model });
+      const naming = core.parseReferenceNaming(raw, manifest, file);
+      const code = naming.existingCode ?? core.elementName(manifest.projectCode, naming.kind, naming.label);
+      // Later images in the batch can match entities proposed earlier (another angle of the same character).
+      manifest = core.upsertProductionEntity(manifest, {
+        code,
+        kind: naming.kind,
+        displayName: naming.label,
+        description: manifest.entities.find((e) => e.code === code)?.description || naming.description,
+      });
+      proposals.push({ file, code, kind: naming.kind, label: naming.label, description: naming.description, tags: naming.tags, existing: Boolean(naming.existingCode) });
+      peak = Math.max(peak, (await localAi.gpuMemory())?.used ?? 0);
+      console.error(`${file} → ${code} (${seconds(t0)}s)`);
+    }
+    await writeFile(proposalsPath, `${JSON.stringify(proposals, null, 2)}\n`);
+    print({
+      proposals: proposals.map((p) => `${p.file} → ${p.code}${p.existing ? " (existing)" : ""}: ${p.description}`),
+      file: toPosix(relative(folder, proposalsPath)),
+      next: "Edit code/label/kind/description or set \"skip\": true, then run again with --apply",
+      seconds: seconds(started),
+      gpuPeakMiB: peak || undefined,
+    });
+  },
+
+  async review(folder, [shotId, takeArg], values) {
+    let manifest = await load(folder);
+    const jobs = [];
+    if (shotId) {
+      const shot = shotOf(manifest, shotId);
+      const take = takeArg ? shot.takes.find((t) => t.take === Number(takeArg)) : core.linkedTake(shot);
+      if (!take?.localPath) fail(`${shotId}: no downloaded take${takeArg ? ` T${takeArg}` : ""}`);
+      jobs.push([shot.id, take.take]);
+    } else {
+      for (const shot of manifest.shots)
+        for (const take of shot.takes)
+          if (take.status === "done" && take.localPath && (values.force || !take.review)) jobs.push([shot.id, take.take]);
+    }
+    if (!jobs.length) return print({ reviewed: [], note: "Nothing to review (use --force to review again)" });
+
+    const model = values.model ?? localAi.VLM_MODEL;
+    const results = [];
+    for (const [id, number] of jobs) {
+      const t0 = performance.now();
+      const shot = shotOf(manifest, id);
+      const take = shot.takes.find((t) => t.take === number);
+      const file = join(folder, take.localPath);
+      if (!existsSync(file)) {
+        console.error(`skip ${take.fileName}: ${take.localPath} is missing`);
+        continue;
+      }
+      // At most three entity reference images; entities with an image go first so they line up with entityImages.
+      const cast = shot.entities.map((code) => manifest.entities.find((e) => e.code === code)).filter(Boolean);
+      const withImage = cast.filter((e) => e.refs.some((r) => IMAGE.test(r) && existsSync(join(folder, r)))).slice(0, 3);
+      const entities = [...withImage, ...cast.filter((e) => !withImage.includes(e))];
+      const entityImages = [];
+      for (const e of withImage) entityImages.push(await localAi.jpegDataUri(join(folder, e.refs.find((r) => IMAGE.test(r) && existsSync(join(folder, r)))), { width: 384 }));
+      const { duration, frames } = await localAi.sampleFrames(file, Number(values.frames ?? 6));
+      const raw = await localAi.chat(core.toOpenAIMessages(core.buildTakeReviewPrompt({ shot, entities, frames, entityImages })), { model });
+      const review = core.parseTakeReview(raw, model, duration);
+      manifest = core.setTakeReview(await load(folder), id, number, review);
+      await save(folder, manifest);
+      results.push({ take: take.fileName, score: review.score, issues: review.issues, trimIn: review.trimIn, trimOut: review.trimOut, seconds: seconds(t0) });
+      console.error(`${take.fileName}: ${review.score}/10 ${review.issues.join("; ")}`);
+    }
+    print({ reviewed: results });
+  },
 };
 
 const [command, ...rest] = process.argv.slice(2);
@@ -310,6 +442,11 @@ const { values, positionals } = parseArgs({
     audio: { type: "string", multiple: true },
     id: { type: "string" },
     ext: { type: "string" },
+    inbox: { type: "string" },
+    apply: { type: "boolean" },
+    model: { type: "string" },
+    frames: { type: "string" },
+    force: { type: "boolean" },
   },
 });
 const [folder, ...args] = command === "targets" ? [".", ...positionals] : positionals;

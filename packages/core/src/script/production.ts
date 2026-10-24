@@ -131,6 +131,8 @@ export interface ProductionEntity {
   readonly description: string;
   /** Local reference files (project-relative paths). */
   readonly refs: readonly string[];
+  /** Kling element tags (Characters, Scenes, Items, ...). */
+  readonly tags?: readonly string[];
   readonly kling?: { readonly elementId: string; readonly type: "image" | "video" };
   readonly higgsfield?: { readonly elementId?: string; readonly soulId?: string };
 }
@@ -153,6 +155,19 @@ export interface ProductionTake {
   readonly mediaId?: string;
   /** Project-folder-relative path of the downloaded file. */
   readonly localPath?: string;
+  readonly review?: TakeReview;
+}
+
+/** Automatic quality check of a downloaded take (local VLM or Claude). */
+export interface TakeReview {
+  /** 0–10: how well the take matches the shot and its entity references. */
+  readonly score: number;
+  readonly issues: readonly string[];
+  /** Suggested usable range in seconds from the start of the take. */
+  readonly trimIn?: number;
+  readonly trimOut?: number;
+  readonly model: string;
+  readonly reviewedAt: number;
 }
 
 export interface ProductionShot {
@@ -417,7 +432,7 @@ export function updateProductionShot(
   });
 }
 
-export type ProductionEntityPatch = Partial<Pick<ProductionEntity, "displayName" | "description" | "refs" | "kling" | "higgsfield">>;
+export type ProductionEntityPatch = Partial<Pick<ProductionEntity, "displayName" | "description" | "refs" | "tags" | "kling" | "higgsfield">>;
 
 export function upsertProductionEntity(
   manifest: ProductionManifest,
@@ -501,9 +516,27 @@ function mergeTakes(a: readonly ProductionTake[], b: readonly ProductionTake[]):
       continue;
     }
     const [low, high] = TAKE_RANK[take.status] >= TAKE_RANK[seen.status] ? [seen, take] : [take, seen];
-    byNumber.set(take.take, { ...low, ...high, localPath: high.localPath ?? low.localPath, generationId: high.generationId ?? low.generationId });
+    byNumber.set(take.take, {
+      ...low,
+      ...high,
+      localPath: high.localPath ?? low.localPath,
+      generationId: high.generationId ?? low.generationId,
+      review: newerReview(high.review, low.review),
+    });
   }
   return [...byNumber.values()].sort((x, y) => x.take - y.take);
+}
+
+function newerReview(a?: TakeReview, b?: TakeReview): TakeReview | undefined {
+  if (!a || !b) return a ?? b;
+  return a.reviewedAt >= b.reviewedAt ? a : b;
+}
+
+/** Stores a review on a take. */
+export function setTakeReview(manifest: ProductionManifest, shotId: string, take: number, review: TakeReview): ProductionManifest {
+  const shot = manifest.shots.find((s) => s.id === shotId);
+  if (!shot?.takes.some((t) => t.take === take)) throw new Error(`Unknown take ${shotId} T${take}`);
+  return withShot(manifest, shotId, (s) => ({ ...s, takes: s.takes.map((t) => (t.take === take ? { ...t, review } : t)) }));
 }
 
 /**
