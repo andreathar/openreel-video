@@ -20,6 +20,10 @@ Cut clips, add captions, mix audio, and finish your video without a watermark.
 
 ---
 
+> **This fork** adds an AI film-production workflow: Fountain script → shot list on the timeline → Kling / Higgsfield prompts and takes under one naming pattern → conform, dialogue assembly and EDL export. See [`docs/film-production.md`](docs/film-production.md); instructions for Claude Code are in [`CLAUDE.md`](CLAUDE.md).
+
+---
+
 ## Make something worth watching
 
 From a quick social clip to a longer edit, OpenReel gives you a timeline, a live preview, and control over the details.
@@ -99,7 +103,7 @@ pnpm install
 pnpm dev
 ```
 
-Open the local URL printed by Vite, usually `http://localhost:5173`.
+Open the local URL printed by Vite (`http://localhost:5180` in this repository).
 
 ```bash
 # Build and preview the browser app

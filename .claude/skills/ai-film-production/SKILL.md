@@ -30,8 +30,14 @@ Use the entity code as the element **name** on both Kling (`element_create name`
 (`manage_reference_elements name`). Generations themselves cannot be named on either platform —
 that is why every submission must be recorded with `prod record` immediately, before polling.
 
+User guide (all commands, buttons, troubleshooting): `docs/film-production.md`. Repo rules: `CLAUDE.md`.
+
 ## Workflow
 
+0. **Start a production** (once): `prod init <folder> <script.fountain> --code <PROJ> [--target id]`
+   creates `production.json`, or the user imports the script in the editor (rail *Import script*)
+   and connects the same folder in the Shot Board. Script changes later: re-import in the editor;
+   prompts, targets and takes of surviving shots are kept, removed shots that already have takes are kept as `orphaned`.
 1. **Orient**: `prod status <folder>` (add `--status todo|prompted|queued`) and `prod entities <folder>`.
 2. **File new references** (local GPU, free): drop images into `refs/_inbox/`, run
    `prod name-refs <folder>` — the local VLM proposes kind, code, description and Kling tags per
@@ -110,3 +116,8 @@ Local AI uses LM Studio at `http://localhost:1235/v1` with `qwen3.5-4b` (overrid
 - Don't change a shot's `id` or scene; re-import the script in the editor instead (it keeps
   prompts, targets and takes for shots that still exist).
 - Don't put credentials in production.json.
+- Don't trust platform limits from memory: if a submission is rejected for references, models or
+  duration, check `who_am_i` / `models_explore` and update `GENERATION_TARGETS` in
+  `packages/core/src/script/production.ts` (with tests) rather than working around it.
+- If the editor goes blank after code changes (`does not provide an export named …`), restart the
+  Vite dev server and clear `apps/web/node_modules/.vite`.

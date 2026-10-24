@@ -2,7 +2,7 @@
 
 # OpenReel Agent — Capability Reference
 
-The agent exposes **303 tools** spanning read/observe, project, track, clip, transform, effect, color, speed, audio, subtitle, keyframe, transition, marker, text and graphics domains — plus `execute_action` and `batch_actions` escape hatches for any capability without a dedicated tool.
+The agent exposes **322 tools** spanning read/observe, project, track, clip, transform, effect, color, speed, audio, subtitle, keyframe, transition, marker, text and graphics domains — plus `execute_action` and `batch_actions` escape hatches for any capability without a dedicated tool.
 
 ## Tools
 
@@ -31,6 +31,10 @@ The agent exposes **303 tools** spanning read/observe, project, track, clip, tra
 - **validate_creation_state** (read-only) — Validate persisted creation assets/scenes for broken references, invalid active scene/camera ids, and animation target issues.
 - **export_creation_scene_gltf** (read-only) — Bake an entire persisted creation scene into one merged CPU-generated triangle mesh and return scene poly stats, per-object stats, and (by default) a glTF 2.0 export with embedded geometry. This composes the procedural primitive recipes with each object's transform. Use it to export a finished creation scene as a real 3D asset or to inspect total scene geometry. model/text3d objects are exported as placeholder boxes until native generators exist.
 - **render_creation_scene_image** (read-only) — Render a persisted creation scene to a real image with the built-in deterministic CPU renderer: bakes the scene mesh, projects it through the scene camera, and returns coverage stats plus (by default) a PNG data URI. mode='raster' (default) z-buffers and Lambert-shades; mode='raytrace' casts primary rays with optional hard shadows for a final-quality preview. This is the CPU render/preview fallback (§7.12) — independent of the WebGPU/scene3d renderer — useful for headless previews and visual-regression checks.
+- **list_script_shots** (read-only) — List the shots on the script SHOTS track with shot id, scene, start time, length, characters, description, production status and whether a real take is linked. Use it to report what still needs prompting or generating.
+- **list_generation_targets** (read-only) — List the Kling and Higgsfield models a shot can be generated with, including the MCP tool, model id, file-name tag and reference limits (elements, images, videos, audio). Pick a target per shot from what the shot needs to reference.
+- **get_production** (read-only) — Read the production manifest of a script project: entities (characters/locations with canonical names like HSTL-CHR-MARA and their Kling/Higgsfield element ids) and shots (target, prompt, references, status, takes with generation ids). Filter shots by status or sceneCode. Each shot includes reference-limit issues for its target.
+- **get_shot_prompt** (read-only) — Build what to submit for a shot on its target (or targetId): the prompt with entities bound as <<<elementId>>>, the Kling 'elements' argument, the MCP tool and model, the duration, the file name the take must be saved as, and any reference-limit issues.
 - **list_motion_animatable_properties** (read-only) — List the animatable properties of a motion layer (Transform always; Shape/Particle/Precomp by type; plus this layer's masks, effects, shape modifiers, and puppet pins), each with its current value at a time and every existing keyframe (id, time, value, easing, whether it has graph-editor bezier handles). Use this to discover keyframe ids before move/remove/re-ease, and to drive a graph-editor workflow.
 - **get_motion_composition** (read-only) — Full detail for one Motion Creator composition: every layer with its id, type, transform, keyframes, and type-specific fields, plus variables, markers, beat markers, camera, and lights. Use this to recover auto-generated layer ids before animating or editing.
 
@@ -234,6 +238,13 @@ The agent exposes **303 tools** spanning read/observe, project, track, clip, tra
 - **update_project_settings** — Update resolution/fps/etc.
 - **rename_project** — Rename the project.
 - **set_canvas_background** — Set background fill mode/color.
+- **import_script** — Parse a Fountain screenplay into scenes and model-length shots, then build scene range markers plus a SHOTS track of named placeholder clips (e.g. HSTL_S012_SH03) as one undo step. Rebuilding replaces the previous script track/markers but keeps shots already relinked to real files. profileId picks the video model durations: kling-v3-omni (3-15s), kling-v4 (3-30s), kling-v2-6 (5/10s), hf-genjutsu (3-30s), hf-seedance-2 (4-15s), generic (1-60s). Set dryRun to preview the breakdown without editing.
+- **update_shot** — Update one shot of the production manifest: targetId (see list_generation_targets), prompt, status (todo, prompted, queued, generated, selected, approved), refs {images, videos, audios} as project-relative paths, entities (entity codes) or selectedTake. Writing a prompt on a todo shot marks it prompted. The clip on the SHOTS track mirrors the status.
+- **upsert_entity** — Add or update a character (CHR), location (LOC), prop (PRP) or voice (VOX). The canonical code (e.g. HSTL-CHR-MARA, max 32 chars) is the name to give the element on Kling and Higgsfield. Store the platform ids after creating elements: kling {elementId, type: image|video}, higgsfield {elementId?, soulId?}. refs are project-relative reference files.
+- **record_take** — Record a submitted Kling/Higgsfield generation as the next take of a shot. Platforms cannot name generations, so call this right after submitting with the generationId (Kling) or job id (Higgsfield); the returned fileName (e.g. HSTL_S001_SH01_kl-v4_T02.mp4) is what the download must be saved as. Use status 'done' once downloaded.
+- **get_scene_runtimes** (read-only) — Per scene of an imported screenplay: script-estimated seconds, current timeline seconds on the SHOTS track, shot count and how many shots have a linked take. Use it to report runtime drift before or after conform_to_takes.
+- **conform_to_takes** — Resize every SHOTS clip that has a linked take to the take's real length (or its review trim range) and ripple the SHOTS track and scene markers. Overwrites manual trims on those clips; one undo step. Returns the shot ids that changed.
+- **export_script_edl** (read-only) — Build a CMX3600 EDL of the SHOTS track for finishing in DaVinci Resolve or Premiere: one event per shot in timeline order, source file names from the linked takes, shots without a take as BL (black) events. Pass sceneCode (e.g. S003) for one scene. Returns the EDL text; the user saves it as <PROJ>_<scene>.edl next to the shots folder.
 
 ## track
 - **add_track** — Add a track (video|audio|image|text|graphics).
@@ -256,8 +267,8 @@ The agent exposes **303 tools** spanning read/observe, project, track, clip, tra
 - **add_clip** — Add a media clip to a track at a time.
 - **remove_clip** (destructive) — Remove a clip.
 - **move_clip** — Move a clip to a new start time / track.
-- **trim_clip** — Set a clip's in/out points (seconds).
-- **split_clip** — Split a clip at a time.
+- **trim_clip** — Trim an existing main-timeline clip by setting either or both source-media inPoint/outPoint values in seconds. Read the current values with get_clip first.
+- **split_clip** — Split an existing main-timeline clip at an absolute timeline time in seconds. The time must fall strictly inside the clip's startTime..startTime+duration range.
 - **ripple_delete_clip** (destructive) — Delete a clip and close the gap.
 - **slip_clip** — Slip a clip's source by delta.
 - **slide_clip** — Slide a clip by delta.
@@ -266,7 +277,7 @@ The agent exposes **303 tools** spanning read/observe, project, track, clip, tra
 - **close_gap** — Close the gap before a clip.
 
 ## speed
-- **set_clip_speed** — Set clip playback speed (recomputes duration).
+- **set_clip_speed** — Set an existing main-timeline clip's playback-speed multiplier (for example 0.5 = half speed, 2 = double speed); recomputes its duration. Use get_capabilities speed.range for limits.
 - **set_clip_reverse** — Toggle clip reverse.
 - **set_clip_pitch_correction** — Toggle pitch correction on speed changes.
 - **set_speed_ramp** — Set speed keyframes / freeze frames / pitch.
@@ -274,7 +285,7 @@ The agent exposes **303 tools** spanning read/observe, project, track, clip, tra
 - **set_clip_chroma_key** — Set green-screen / chroma-key settings.
 
 ## transform
-- **set_clip_transform** — Set position/scale/rotation/opacity/crop/fitMode.
+- **set_clip_transform** — Update an existing main-timeline clip's static transform. position is a pixel offset from canvas center; scale uses 1 = 100%; rotation is degrees; opacity is 0..1. Partial nested updates are safely merged, so {scale:{x:1.2,y:1.2}} performs a 120% zoom without resetting position.
 - **set_clip_blend_mode** — Set a clip's blend mode.
 - **set_clip_blend_opacity** — Set a clip's blend opacity (0..1).
 
@@ -292,7 +303,7 @@ The agent exposes **303 tools** spanning read/observe, project, track, clip, tra
 - **set_clip_volume** — Set a clip's volume (0..1+).
 - **set_clip_fade** — Set audio fade in/out seconds.
 - **add_audio_automation** — Add audio automation points.
-- **add_audio_effect** — Add an audio effect to a clip.
+- **add_audio_effect** — Add an audio effect to an existing main-timeline clip. Pass effectType (gain|pan|eq|compressor|reverb|delay|noiseReduction|fadeIn|fadeOut) and optional params; the effect id is generated automatically. A complete legacy effect object is also accepted.
 - **remove_audio_effect** — Remove an audio effect.
 - **update_audio_effect** — Update an audio effect's params.
 - **toggle_audio_effect** — Enable/disable an audio effect.
@@ -305,13 +316,13 @@ The agent exposes **303 tools** spanning read/observe, project, track, clip, tra
 - **set_subtitle_style** — Set the global subtitle style.
 
 ## keyframe
-- **add_keyframe** — Add a keyframe for a clip property.
+- **add_keyframe** — Animate an existing main-timeline clip by adding a property keyframe at clip-local time in seconds. Supported transform properties are opacity, position.x/y, scale.x/y, and rotation; supported effect properties are effect.brightness/contrast/saturation/blur. Add at least two keyframes for interpolation.
 - **remove_keyframe** — Remove a keyframe.
-- **set_clip_keyframes** — Replace all keyframes on a clip.
+- **set_clip_keyframes** — Replace all animation keyframes on an existing main-timeline clip. Times are clip-local seconds. Each item needs property, time, and value; id and easing default automatically.
 
 ## transition
-- **add_transition** — Add a transition between two clips.
-- **update_transition** — Update a transition.
+- **add_transition** — Add a rendered transition between two adjacent existing clips on the same main-timeline track. Use list_clips for ordered clip ids and get_capabilities transitionTypes for values such as whipPan, zoom, push, glitch, or flash.
+- **update_transition** — Update an existing main-timeline transition's type and/or duration.
 - **remove_transition** — Remove a transition.
 
 ## marker
@@ -347,6 +358,16 @@ The agent exposes **303 tools** spanning read/observe, project, track, clip, tra
 - **cancel_motion_render_item** — Cancel a queued or in-progress motion render queue item by itemId. A queued item is canceled immediately; a rendering item stops at the next frame boundary. Returns whether the item was found.
 - **export_video** (expensive) — Render the whole project to a local video file (format: mp4|webm|mov, default mp4) and return its local result metadata. Expensive — requires confirmation.
 - **export_audio** (expensive) — Render the project audio to a local file (format: mp3|wav|aac|flac|ogg, default wav) and return its local result metadata. Expensive — requires confirmation.
+
+## multicam
+- **get_project_manifest** (read-only) — Return the exact openreel-multicam/v1 manifest for a camera group, including participants, camera subjects, sync reference, and hard constraints.
+- **get_activity_map** (read-only) — Read the reusable .orma speech activity map for an optional millisecond range. Large maps are deterministically sampled to at most 2,000 points.
+- **get_transcript** (read-only) — Read optional per-participant local Whisper transcript segments from the separate .orma artifact.
+- **set_edit_policy** (destructive) — Re-plan the automatic multicam edit from cached analysis. All values are schema-validated and manifest shot constraints remain hard bounds.
+- **annotate_segment** — Attach a concise planning note to a bounded multicam time range without modifying cached analysis.
+- **get_edit_summary** (read-only) — Summarize shots, layouts, pending cut review, annotations, and top deterministic social candidates.
+- **override_cut** (destructive) — Accept, reject, nudge by at most 2 seconds, or assign a valid manifest camera to one generated cut.
+- **preview_frame** (read-only, expensive) — Render a frame at a bounded millisecond time for visual inspection of the current multicam edit.
 
 ## Capability manifest (enums + parameter ranges)
 

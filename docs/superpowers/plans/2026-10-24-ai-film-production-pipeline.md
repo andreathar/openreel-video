@@ -1,7 +1,7 @@
 # AI Film Production Pipeline — Evaluation & Implementation Plan
 
 **Date:** 2026-10-24
-**Status:** Proposal — needs owner decisions (see §9) before Phase 1 starts
+**Status:** Implemented — phases 1–5 done on branch `feat/ai-film-pipeline` (c522378, 8a7280f, ae44096, a838b9e, e6a49e6, 0616d17). Usage: `docs/film-production.md`. Not yet tried end to end with paid generations or a Resolve EDL import.
 **Target machine:** Linux, i7, 32 GB RAM, RTX 3060 6 GB
 **Goal:** Turn OpenReel into a personal film-production cockpit: script → shot list → prompts on Kling / Higgsfield → generated assets land locally with one naming pattern → auto-placed on the timeline.
 
