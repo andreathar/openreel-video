@@ -45,6 +45,7 @@ coverage/
 docs/*
 !docs/superpowers/
 !docs/android-port/
+!docs/film-production.md
 .worktrees/
 # Project-specific
 /public/projects/
@@ -76,6 +77,7 @@ apps/desktop/release/
 FEATURES_TWITTER.md
 .claude-tasks.md
 CLAUDE.md
+!/CLAUDE.md
 *-PLAN.md
 *-PLAN-*.md
 .playwright-mcp/
