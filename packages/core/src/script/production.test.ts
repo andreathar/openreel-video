@@ -4,7 +4,10 @@ import { parseFountain } from "./fountain";
 import {
   buildShotPrompt,
   getGenerationTarget,
+  linkedTake,
   mergeProductionManifest,
+  reconcileProductionManifests,
+  registerTakeFile,
   parseProductionManifest,
   recordProductionTake,
   serializeProductionManifest,
@@ -135,5 +138,51 @@ describe("timeline integration", () => {
     // Rebuilding keeps the status.
     const rebuilt = buildScriptTimeline(updated, plan);
     expect((rebuilt.timeline.tracks[0].clips[0].metadata?.script as { status: string }).status).toBe("approved");
+  });
+});
+
+describe("folder sync", () => {
+  it("registers take files by canonical name and ignores others", () => {
+    const m = manifest();
+    const found = registerTakeFile(m, "shots/S001/HSTL_S001_SH01_hf-gjm_T03.mp4");
+    expect(found.changed).toBe(true);
+    const shot = found.manifest.shots[0];
+    expect(shot.status).toBe("generated");
+    expect(shot.takes[0]).toEqual(expect.objectContaining({ take: 3, targetId: "hf-genjutsu-motion", status: "done" }));
+    expect(linkedTake(shot)?.localPath).toBe("shots/S001/HSTL_S001_SH01_hf-gjm_T03.mp4");
+    expect(registerTakeFile(found.manifest, "shots/S001/HSTL_S001_SH01_hf-gjm_T03.mp4").changed).toBe(false);
+    expect(registerTakeFile(m, "random_video.mp4").changed).toBe(false);
+    expect(registerTakeFile(m, "OTHER_S001_SH01_kl-v4_T01.mp4").changed).toBe(false);
+  });
+
+  it("completes a queued take when its file appears", () => {
+    const queued = recordProductionTake(manifest(), "HSTL_S001_SH01", { generationId: "g1" }).manifest;
+    const done = registerTakeFile(queued, "shots/S001/HSTL_S001_SH01_kl-v4_T01.mp4").manifest;
+    expect(done.shots[0].takes).toHaveLength(1);
+    expect(done.shots[0].takes[0]).toEqual(expect.objectContaining({ generationId: "g1", status: "done" }));
+  });
+
+  it("prefers the selected take", () => {
+    let m = registerTakeFile(manifest(), "a/HSTL_S001_SH01_kl-v4_T01.mp4").manifest;
+    m = registerTakeFile(m, "a/HSTL_S001_SH01_kl-v4_T02.mp4").manifest;
+    expect(linkedTake(m.shots[0])?.take).toBe(2);
+    m = updateProductionShot(m, "HSTL_S001_SH01", { selectedTake: 1 });
+    expect(linkedTake(m.shots[0])?.take).toBe(1);
+  });
+
+  it("reconciles the project copy with production.json", () => {
+    const base = manifest();
+    const local = { ...updateProductionShot(base, "HSTL_S001_SH01", { prompt: "local prompt" }), updatedAt: 100 };
+    let remote = recordProductionTake(base, "HSTL_S001_SH01", { generationId: "g1" }).manifest;
+    remote = upsertProductionEntity(remote, { kind: "CHR", displayName: "MARA", kling: { elementId: "9", type: "image" } });
+    remote = { ...remote, updatedAt: 200 };
+    const merged = reconcileProductionManifests(local, remote);
+    // Remote is newer, so its prompt (empty) wins, but no take or element id is lost either way.
+    expect(merged.shots[0].takes[0].generationId).toBe("g1");
+    expect(merged.entities.find((e) => e.code === "HSTL-CHR-MARA")?.kling?.elementId).toBe("9");
+    const reverse = reconcileProductionManifests({ ...remote, updatedAt: 50 }, local);
+    expect(reverse.shots[0].prompt).toBe("local prompt");
+    expect(reverse.shots[0].takes[0].generationId).toBe("g1");
+    expect(reverse.entities.find((e) => e.code === "HSTL-CHR-MARA")?.kling?.elementId).toBe("9");
   });
 });

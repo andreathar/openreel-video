@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { Clapperboard, Copy, Download, Upload } from "@/icons/lucide-compat";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Clapperboard, Copy, Download, FolderSync, Upload } from "@/icons/lucide-compat";
 import {
   GENERATION_TARGETS,
   SHOT_STATUSES,
@@ -30,6 +30,14 @@ import { useTimelineStore } from "../../stores/timeline-store";
 import { useUIStore } from "../../stores/ui-store";
 import { toast } from "../../stores/notification-store";
 import { cloneEditSnapshot } from "../../services/agent/editing-session";
+import {
+  getProductionFolder,
+  isProductionFolderSupported,
+  pickProductionFolder,
+  pushProductionToFolder,
+  rememberedProductionFolderName,
+  syncProductionFolder,
+} from "../../services/production-folder";
 
 interface ShotBoardDialogProps {
   isOpen: boolean;
@@ -56,8 +64,14 @@ async function saveProduction(production: ProductionManifest): Promise<boolean> 
     timestamp: Date.now(),
     params: { snapshot: cloneEditSnapshot(editSnapshot(next)) },
   });
-  if (!result.success) toast.error("Could not update shot", result.error?.message ?? "Timeline update failed");
-  return result.success;
+  if (!result.success) {
+    toast.error("Could not update shot", result.error?.message ?? "Timeline update failed");
+    return false;
+  }
+  await pushProductionToFolder(store.project.id, production).catch((error) =>
+    toast.error("Could not write production.json", error instanceof Error ? error.message : String(error)),
+  );
+  return true;
 }
 
 function downloadText(text: string, fileName: string, type: string): void {
@@ -97,6 +111,70 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
   const [targetFilter, setTargetFilter] = useState(ALL);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftPrompt, setDraftPrompt] = useState<{ id: string; text: string } | null>(null);
+  const projectId = useProjectStore((state) => state.project.id);
+  const [folderName, setFolderName] = useState<string | null>(null);
+  const [folderReady, setFolderReady] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const syncing = useRef(false);
+
+  const runSync = useCallback(
+    async (dir: FileSystemDirectoryHandle, quiet: boolean) => {
+      if (syncing.current) return;
+      syncing.current = true;
+      setIsSyncing(true);
+      try {
+        const result = await syncProductionFolder(dir);
+        if (!quiet || result.registered.length || result.linked.length) {
+          toast.success(
+            "Production folder synced",
+            `${result.registered.length} new take files · ${result.linked.length} clips linked` +
+              (result.failed.length ? ` · ${result.failed.length} failed` : ""),
+          );
+        }
+      } catch (error) {
+        toast.error("Folder sync failed", error instanceof Error ? error.message : String(error));
+      } finally {
+        syncing.current = false;
+        setIsSyncing(false);
+      }
+    },
+    [],
+  );
+
+  // Reconnect the remembered folder and keep pulling what Claude Code writes while the board is open.
+  useEffect(() => {
+    if (!isOpen || !isProductionFolderSupported()) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    void (async () => {
+      setFolderName(await rememberedProductionFolderName(projectId));
+      const dir = await getProductionFolder(projectId);
+      if (cancelled || !dir) return;
+      setFolderReady(true);
+      await runSync(dir, true);
+      timer = setInterval(() => void runSync(dir, true), 10_000);
+    })();
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [isOpen, projectId, runSync]);
+
+  const handleFolder = useCallback(async () => {
+    const dir = folderReady || folderName ? await getProductionFolder(projectId, true) : await pickProductionFolder(projectId);
+    if (!dir) return;
+    setFolderName(dir.name);
+    setFolderReady(true);
+    await runSync(dir, false);
+  }, [folderName, folderReady, projectId, runSync]);
+
+  const handleChangeFolder = useCallback(async () => {
+    const dir = await pickProductionFolder(projectId);
+    if (!dir) return;
+    setFolderName(dir.name);
+    setFolderReady(true);
+    await runSync(dir, false);
+  }, [projectId, runSync]);
 
   const scenes = useMemo(() => [...new Set(production?.shots.map((s) => s.sceneCode) ?? [])], [production]);
   const shots = useMemo(
@@ -209,6 +287,19 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
                   <Button label="production.json" size="sm" variant="secondary" icon={<Download size={14} aria-hidden />}
                     onClick={() => downloadText(serializeProductionManifest(production), `${production.projectCode}_production.json`, "application/json")} />
                   <Button label="Import" size="sm" variant="ghost" icon={<Upload size={14} aria-hidden />} onClick={handleImport} />
+                  {isProductionFolderSupported() && (
+                    <>
+                      <Button
+                        label={isSyncing ? "Syncing…" : folderName ? `Sync ${folderName}` : "Connect folder"}
+                        size="sm"
+                        variant={folderName ? "secondary" : "primary"}
+                        icon={<FolderSync size={14} aria-hidden />}
+                        isDisabled={isSyncing}
+                        onClick={handleFolder}
+                      />
+                      {folderName && <Button label="Change" size="sm" variant="ghost" onClick={handleChangeFolder} />}
+                    </>
+                  )}
                 </div>
 
                 <div className="flex min-h-0 flex-1 gap-3">
@@ -342,7 +433,7 @@ export const ShotBoardDialog: React.FC<ShotBoardDialogProps> = ({ isOpen, onClos
         footer={
           <LayoutFooter hasDivider>
             <Text type="supporting" color="secondary" className="mr-auto">
-              Ask the AI chat or Claude Code to create elements and submit shots; generation ids are stored as takes.
+              Connect the production folder Claude Code works in: production.json and shots/ are synced every 10s while this board is open.
             </Text>
             <Button label="Close" variant="ghost" size="sm" onClick={onClose} />
           </LayoutFooter>

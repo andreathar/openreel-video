@@ -151,6 +151,8 @@ export interface ProductionTake {
   /** Kling generationId or Higgsfield job id; the only link back to the platform. */
   readonly generationId?: string;
   readonly mediaId?: string;
+  /** Project-folder-relative path of the downloaded file. */
+  readonly localPath?: string;
 }
 
 export interface ProductionShot {
@@ -486,4 +488,84 @@ export function parseProductionManifest(json: string): ProductionManifest {
     shots: data.shots.map((s) => ({ ...s, refs: s.refs ?? EMPTY_REFS, takes: s.takes ?? [], status: SHOT_STATUSES.includes(s.status) ? s.status : "todo" })),
     updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : Date.now(),
   };
+}
+
+const TAKE_RANK: Record<ProductionTake["status"], number> = { queued: 0, failed: 1, done: 2 };
+
+function mergeTakes(a: readonly ProductionTake[], b: readonly ProductionTake[]): ProductionTake[] {
+  const byNumber = new Map<number, ProductionTake>();
+  for (const take of [...a, ...b]) {
+    const seen = byNumber.get(take.take);
+    if (!seen) {
+      byNumber.set(take.take, take);
+      continue;
+    }
+    const [low, high] = TAKE_RANK[take.status] >= TAKE_RANK[seen.status] ? [seen, take] : [take, seen];
+    byNumber.set(take.take, { ...low, ...high, localPath: high.localPath ?? low.localPath, generationId: high.generationId ?? low.generationId });
+  }
+  return [...byNumber.values()].sort((x, y) => x.take - y.take);
+}
+
+/**
+ * Merges two copies of a manifest, e.g. the project's and production.json
+ * written by Claude Code. The newer copy wins field by field; takes and
+ * platform element ids from both are kept.
+ */
+export function reconcileProductionManifests(local: ProductionManifest, remote: ProductionManifest): ProductionManifest {
+  const [base, other] = remote.updatedAt > local.updatedAt ? [remote, local] : [local, remote];
+  const otherShots = new Map(other.shots.map((s) => [s.id, s]));
+  const shots: ProductionShot[] = base.shots.map((shot) => {
+    const twin = otherShots.get(shot.id);
+    otherShots.delete(shot.id);
+    return twin ? { ...shot, takes: mergeTakes(twin.takes, shot.takes) } : shot;
+  });
+  shots.push(...otherShots.values());
+  const otherEntities = new Map(other.entities.map((e) => [e.code, e]));
+  const entities: ProductionEntity[] = base.entities.map((entity) => {
+    const twin = otherEntities.get(entity.code);
+    otherEntities.delete(entity.code);
+    return twin
+      ? { ...entity, kling: entity.kling ?? twin.kling, higgsfield: entity.higgsfield ?? twin.higgsfield, refs: entity.refs.length ? entity.refs : twin.refs }
+      : entity;
+  });
+  entities.push(...otherEntities.values());
+  return { ...base, shots: shots.map(promoteShotStatus), entities, updatedAt: Math.max(local.updatedAt, remote.updatedAt) };
+}
+
+/** A shot with a downloaded take is at least "generated". */
+function promoteShotStatus(shot: ProductionShot): ProductionShot {
+  const hasFile = shot.takes.some((t) => t.status === "done" && t.localPath);
+  return hasFile && SHOT_STATUSES.indexOf(shot.status) < SHOT_STATUSES.indexOf("generated") ? { ...shot, status: "generated" } : shot;
+}
+
+/**
+ * Registers a take file found on disk (e.g. shots/S001/HSTL_S001_SH01_kl-v4_T02.mp4).
+ * Files are matched purely by their canonical name; anything else is ignored.
+ */
+export function registerTakeFile(
+  manifest: ProductionManifest,
+  path: string,
+): { manifest: ProductionManifest; shotId?: string; changed: boolean } {
+  const parsed = parseProductionName(path);
+  if (!parsed?.take || !parsed.modelTag) return { manifest, changed: false };
+  const shot = manifest.shots.find((s) => s.id === parsed.shotId);
+  if (!shot) return { manifest, changed: false };
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+  const existing = shot.takes.find((t) => t.take === parsed.take);
+  if (existing?.status === "done" && existing.localPath === path) return { manifest, shotId: shot.id, changed: false };
+  const target =
+    GENERATION_TARGETS.find((t) => normalizeModelTag(t.modelTag) === parsed.modelTag) ?? getGenerationTarget(shot.targetId);
+  const take: ProductionTake = existing
+    ? { ...existing, fileName, status: "done", localPath: path }
+    : { take: parsed.take, targetId: target.id, fileName, prompt: "", submittedAt: Date.now(), status: "done", localPath: path };
+  const next = withShot(manifest, shot.id, (s) =>
+    promoteShotStatus({ ...s, takes: mergeTakes(s.takes.filter((t) => t.take !== take.take), [take]) }),
+  );
+  return { manifest: next, shotId: shot.id, changed: true };
+}
+
+/** The take a shot's timeline clip should play: the selected one, else the newest downloaded one. */
+export function linkedTake(shot: ProductionShot): ProductionTake | undefined {
+  const files = shot.takes.filter((t) => t.status === "done" && t.localPath);
+  return files.find((t) => t.take === shot.selectedTake) ?? files[files.length - 1];
 }
