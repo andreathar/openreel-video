@@ -624,7 +624,7 @@ export async function convertDraft(text: string, options: ConvertDraftOptions = 
       for (let i = 0; i < index; i++) {
         for (const c of results[i]?.characters ?? []) if (!known.includes(c)) known.push(c);
       }
-      const key = `${kind}\n${known.join(",")}\n${chunkLines.map((l) => l.text).join("\n")}`;
+      const key = `${kind}\n${chunkLines[0].n}\n${known.join(",")}\n${chunkLines.map((l) => l.text).join("\n")}`;
       const cached = cache?.get(key);
       if (cached) return cached;
 
@@ -649,10 +649,16 @@ export async function convertDraft(text: string, options: ConvertDraftOptions = 
       return labelsFromRules(chunk);
     };
 
+    let stopped = false;
     const worker = async () => {
-      while (next < chunks.length) {
+      while (!stopped && next < chunks.length) {
         const index = next++;
-        results[index] = await labelChunk(index);
+        try {
+          results[index] = await labelChunk(index);
+        } catch (error) {
+          stopped = true;
+          throw error;
+        }
       }
     };
     await Promise.all(Array.from({ length: Math.min(parallel, chunks.length) }, worker));

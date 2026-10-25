@@ -248,10 +248,14 @@ describe("convertDraft", () => {
   };
 
   it("chunks long drafts and carries characters", async () => {
-    const request = ruleModel();
+    const rules = ruleModel();
+    const request = vi.fn(async (prompt: StructuredPrompt) => {
+      const reply = JSON.parse(await rules(prompt));
+      return json(rules.mock.calls.length === 1 ? { ...reply, characters: [...reply.characters, "NOVA"] } : reply);
+    });
     const result = await convertDraft(longScreenplay(), { request, chunkLines: 200 });
     expect(request).toHaveBeenCalledTimes(3);
-    expect(request.mock.calls[1][0].user).toContain("Known characters: MARA");
+    expect(request.mock.calls[1][0].user).toContain("Known characters: MARA, NOVA");
     expect(result.check.ok).toBe(true);
     expect(result.flagged).toEqual([]);
   });
@@ -263,6 +267,26 @@ describe("convertDraft", () => {
     const calls = request.mock.calls.length;
     await convertDraft(longScreenplay(), { request, chunkLines: 200, cache });
     expect(request.mock.calls.length).toBe(calls);
+  });
+
+  it("does not reuse cached labels at a different line offset", async () => {
+    const request = ruleModel();
+    const cache = new Map<string, DraftLabels>();
+    const source = longScreenplay();
+    await convertDraft(source, { request, chunkLines: 200, cache });
+    const calls = request.mock.calls.length;
+    const shifted = await convertDraft(`Rain falls\n\n${source}`, { request, chunkLines: 200, cache });
+    expect(request.mock.calls.length).toBeGreaterThan(calls);
+    expect(shifted.check.ok).toBe(true);
+  });
+
+  it("stops pulling chunks after a failure", async () => {
+    const request = vi.fn(async () => {
+      throw new Error("HTTP 500");
+    });
+    await expect(convertDraft(longScreenplay(), { request, chunkLines: 200, parallel: 2 })).rejects.toThrow("HTTP 500");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(request.mock.calls.length).toBeLessThanOrEqual(2);
   });
 
   it("flags prose without AI", async () => {
