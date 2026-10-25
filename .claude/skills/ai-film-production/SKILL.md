@@ -37,7 +37,8 @@ User guide (all commands, buttons, troubleshooting): `docs/film-production.md`. 
 0. **Start a production** (once). No Fountain yet? `prod format-script <folder> <draft.txt|md> [--out script.fountain] [--model id] [--no-ai] [--force]`
    formats any draft (prose or loose screenplay); the local model only labels line numbers (`--no-ai`: rules only),
    so it never rewrites words. It marks AI-added prose headings `[[added by AI]]`, prints dropped page artifacts and
-   flagged line ranges (source line numbers) to review, and exits 1 only if the model cannot be reached. Then: `prod init <folder> <script.fountain> --code <PROJ> [--target id]`
+   flagged line ranges (source line numbers) to review. It exits 1 without writing when the draft cannot be read,
+   the output exists without `--force`, or the model is unreachable or errors; flags and a failed word check still exit 0. Then: `prod init <folder> <script.fountain> --code <PROJ> [--target id]`
    creates `production.json`, or the user imports the script in the editor (rail *Import script*)
    and connects the same folder in the Shot Board. Script changes later: re-import in the editor;
    prompts, targets and takes of surviving shots are kept, removed shots that already have takes are kept as `orphaned`.

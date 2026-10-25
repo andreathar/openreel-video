@@ -36,32 +36,40 @@ screenplay pasted from a PDF or a word processor can be converted first.
 
 - **In the editor**: the guided import arrives in a later part of this work. Until then use the CLI.
 - **With the CLI**: `node scripts/production/prod.mjs format-script <folder> draft.txt`
-  writes `<folder>/script.fountain`. `--out` picks another file (a relative path is taken
-  from `<folder>`, an absolute path is used as is); an existing file is only replaced with
+  writes `<folder>/script.fountain`. A relative draft path is looked up in `<folder>` first,
+  then in the current directory. `--out` picks another file (a relative path is taken from
+  `<folder>`, an absolute path is used as is); an existing file is only replaced with
   `--force`. Then run `prod.mjs init <folder> <folder>/script.fountain`.
 - **When the model is used.** A draft that is already clean Fountain (nothing to clean up, no bare
-  title line) is copied unchanged. A
-  screenplay whose every line the rules read with confidence (headings, cues, dialogue,
+  title line; a Fountain title page is fine) is copied unchanged. A screenplay whose every line the rules read with confidence (headings, cues, dialogue,
   transitions) is formatted by rules alone, also after page artifacts are removed. Prose, and
   screenplays with lines the rules are unsure of, are labelled by the local model (LM Studio,
   see *Local AI*). `--no-ai` never calls the model: unsure lines keep the rule reading and are flagged, and
   prose comes out as action paragraphs without scene headings, flagged `needs the local model`.
 - **Your words are never rewritten.** The model only returns line numbers saying which lines are
   headings, action, cues, parentheticals, dialogue and transitions; every line of the output is
-  copied from the draft. Before that, cleanup removes only page numbers, `(MORE)`, `(CONT'D)`
-  and `CONTINUED` markers, and a running header: a line of at most six words repeated at least
-  three times, each time alone between blank lines (or right after a page number), that is not
-  shaped like a character cue (capitals only), does not end in `:` or a sentence mark and is
-  not a heading. So a cue, `CUT TO:` or a one-word reply that repeats is kept. A line that
+  copied from the draft. Before that, cleanup removes only page numbers (a line holding just a
+  number of up to three digits, optionally followed by `.`), the markers `(MORE)`, `(CONT'D)`,
+  `(CONTINUED)` and `CONTINUED:` written exactly so (and ` (CONT'D)` after a cue), and a running
+  header: a line of at most six words repeated at least three times, each time alone between
+  blank lines (or right after a page number), that is not shaped like a character cue (capitals
+  only), does not end in `:` or a sentence mark and is not a heading. The line directly under a
+  capitals-only line (a cue) is never removed, so a reply `More` or `42` stays in its speech, and
+  a cue, `CUT TO:` or a one-word reply that repeats is kept. A line that
   continues in lowercase after a line broken mid-sentence is rejoined to it (a word hyphenated
   across the break becomes one word). The command prints every removed line under
   `dropped`.
 - **The word check** compares the words of the output with the words of the file you gave it,
   minus exactly the dropped lines. Any other difference is printed as `missing words` or
   `added words`.
-- **Title.** A single short line (up to eight words, no closing punctuation) that is the only
-  text before the first scene heading of a screenplay is taken as the film's title and becomes the Fountain title page (`Title: …`). A first line that only looks like a
-  title-page entry, such as `Treatment: The Lighthouse Keeper`, is kept as action (`!` prefix).
+- **Title.** A Fountain title page at the top (a block of `Title:`, `Credit:`, `Author:`,
+  `Authors:`, `Source:`, `Draft date:`, `Date:`, `Contact:`, `Copyright:`, `Notes:` or
+  `Revision:` lines, ending in a blank line) is copied as it is. A single line in capitals of two
+  to eight words, without closing punctuation, that is the only text before the first scene
+  heading of a screenplay is taken as the film's title and becomes the title page
+  (`Title: …`); anything less sure, such as `Darkness`, stays action. A first line that only
+  looks like a title-page entry with another key, such as `Treatment: The Lighthouse Keeper`,
+  is kept as action (`!` prefix).
 - **`[[added by AI]]`**: prose has no scene headings, so the model may propose one per scene
   (for example `INT. KITCHEN - NIGHT`). It is the only text the model writes, and only for prose:
   it must be one line of at most 60 characters shaped like a scene heading, or the reply is
@@ -71,9 +79,9 @@ screenplay pasted from a PDF or a word processor can be converted first.
   number of scenes, speeches, action blocks, transitions and AI headings, the title page and the
   dropped lines. It then lists each chunk it could not trust as `lines 12–40 of draft.txt: reason`,
   in line numbers of your file. A chunk whose model reply was invalid twice, or ran out of output
-  tokens, falls back to the rule-based reading, so read those lines in the output. If the model
-  cannot be reached or returns an error, the command prints the message and exits 1 without
-  writing a file; otherwise it exits 0, even with flags or a failed check: the file is a first
+  tokens, falls back to the rule-based reading, so read those lines in the output. If the draft
+  cannot be read, the output file exists without `--force`, or the model cannot be reached or
+  returns an error, the command prints the message and exits 1 without writing a file; otherwise it exits 0, even with flags or a failed check: the file is a first
   draft for you to review.
 
 `node scripts/production/eval-format.mjs` scores the model on three sample drafts in
