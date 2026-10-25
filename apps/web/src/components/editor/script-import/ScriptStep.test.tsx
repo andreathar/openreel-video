@@ -83,10 +83,11 @@ describe("ScriptStep", () => {
   });
 
   it("tints AI-added headings and counts them", () => {
-    const fountain = "INT. ROOM - DAY [[added by AI]]\n\nMARA enters.\n";
+    const fountain = ".INT. ROOM - DAY [[added by AI]]\n\nMARA enters.\n";
     setup({ conversion: conv({ fountain, addedHeadings: 1 }), fountain });
     expect(screen.getByText(/1 scene headings? (was|were) added by AI/)).toBeInTheDocument();
-    expect(screen.getByTestId("heading-added")).toHaveTextContent("INT. ROOM - DAY");
+    expect(screen.getByTestId("heading-added")).toHaveTextContent(/^INT\. ROOM - DAY$/);
+    expect(screen.getAllByRole("region", { name: "Your draft" })).toHaveLength(1);
   });
 
   it("plain primary label and handlers", () => {

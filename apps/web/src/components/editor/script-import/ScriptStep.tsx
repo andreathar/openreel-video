@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Copy, Download } from "@/icons/lucide-compat";
-import { formatScriptSummary, isAddedHeading, parseFountain, summarizeScript, type DraftConversion } from "@openreel/core";
+import { formatScriptSummary, parseFountain, summarizeScript, type DraftConversion } from "@openreel/core";
 import { ToolcraftButton as Button, ToolcraftText as Text, ToolcraftTextAreaControl as TextArea } from "@openreel/ui";
 import type { FormatOutcome } from "../../../services/draft-format";
 import { useSettingsStore } from "../../../stores/settings-store";
@@ -17,6 +17,7 @@ export interface ScriptStepProps {
   onNext: () => void;
 }
 
+const AI_MARKER = /\s*\[\[added by AI\]\]\s*$/;
 const HEADING = /^(?:INT\.?|EXT\.?|EST\.?|INT\.?\/EXT\.?|I\/E|\.[A-Za-z])/i;
 
 function downloadText(text: string, fileName: string): void {
@@ -39,8 +40,12 @@ export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onRef
   const hasAddedHeadings = conversion.addedHeadings > 0;
 
   const copy = async () => {
-    await navigator.clipboard.writeText(fountain);
-    toast.success("Fountain copied", "On the clipboard");
+    try {
+      await navigator.clipboard.writeText(fountain);
+      toast.success("Fountain copied", "On the clipboard");
+    } catch {
+      toast.error("Copy failed", "The browser blocked clipboard access");
+    }
   };
 
   return (
@@ -103,7 +108,7 @@ export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onRef
       <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-1">
           <Text type="supporting" weight="medium">Your draft</Text>
-          <pre className="max-h-96 overflow-auto rounded-md border border-border p-2 text-xs" aria-label="Your draft">
+          <pre className="max-h-96 overflow-auto rounded-md border border-border p-2 text-xs" role="region" aria-label="Your draft">
             {draftLines.map((line, i) => (
               <div key={i} className="flex gap-2">
                 <span className="w-8 shrink-0 select-none text-right text-muted-foreground">{i + 1}</span>
@@ -116,10 +121,10 @@ export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onRef
           {headings.length > 0 && (
             <ul className="text-xs" aria-label="Scene headings">
               {headings.map((h, i) =>
-                isAddedHeading(h) ? (
-                  <li key={i} data-testid="heading-added" className="rounded bg-yellow-500/20 px-1">{h.replace(/\s*\[\[added by AI\]\]\s*$/, "")}</li>
+                AI_MARKER.test(h) ? (
+                  <li key={i} data-testid="heading-added" className="rounded bg-yellow-500/20 px-1">{h.trim().replace(AI_MARKER, "").replace(/^\./, "")}</li>
                 ) : (
-                  <li key={i} className="px-1">{h}</li>
+                  <li key={i} className="px-1">{h.trim().replace(/^\./, "")}</li>
                 ),
               )}
             </ul>
