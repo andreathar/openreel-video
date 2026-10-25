@@ -11,42 +11,73 @@ export interface DraftLine {
   readonly n: number;
   /** Blank lines are kept as "". */
   readonly text: string;
+  /** First line of the pasted source this line comes from (1-based); absent for hand-built lines. */
+  readonly sourceLine?: number;
+  /** Last source line it covers (a rejoined paragraph or a collapsed blank run spans several). */
+  readonly sourceEnd?: number;
+}
+
+/** A hard-wrapped word rejoined across a line break (`over-` + `whelmed`), which changes the word list. */
+export interface HyphenJoin {
+  readonly before: string;
+  readonly after: string;
 }
 
 export interface NormalizedDraft {
   readonly lines: readonly DraftLine[];
-  /** Removed artifacts, in input order (page numbers, headers, CONT'D markers). */
+  /**
+   * Removed source lines, in input order: page numbers, (MORE)/(CONT'D)/CONTINUED markers,
+   * running headers, and " (CONT'D)" cut from a cue. The word check subtracts exactly these.
+   */
   readonly dropped: readonly string[];
+  readonly joins: readonly HyphenJoin[];
+  /** True when nothing was dropped or rejoined, so the text means the same as the source line for line. */
+  readonly unchanged: boolean;
 }
 
 const PAGE_NUMBER = /^\d{1,3}\.?$/;
 const CONTINUATION = /^\(?(CONTINUED|CONT'D|MORE)\)?:?$/i;
 const TRAILING_CONTD = / \(CONT'D\)$/;
-const CUE_SHAPED = /^[A-Z0-9 '.()-]+$/;
+const CUE_SHAPED = /^[\p{Lu}\p{N} '.()\-]+$/u;
 const SCENE_PREFIX = /^(INT|EXT|EST|I\/E)\b/i;
 const SENTENCE_END = /[.!?:;"')]$/;
 const REPEAT_THRESHOLD = 3;
 const REPEAT_MAX_WORDS = 6;
 
 const wordCount = (text: string) => (text.match(/\S+/g) ?? []).length;
-const isAllCaps = (text: string) => /[A-Z]/.test(text) && !/[a-z]/.test(text);
-const startsLower = (text: string) => /^[a-z]/.test(text);
+/** Lowercase letters other than ß, which has no single-letter capital in most text. */
+const hasLower = (text: string) => /\p{Ll}/u.test(text.replace(/ß/g, ""));
+const isAllCaps = (text: string) => /\p{Lu}/u.test(text) && !hasLower(text);
+const startsLower = (text: string) => /^\p{Ll}/u.test(text);
+const isPageArtifact = (line: string) => PAGE_NUMBER.test(line) || CONTINUATION.test(line);
 
-/** A repeated line is a running header/footer unless it could be a cue, dialogue or heading. */
-function isRunningHeader(line: string, count: number): boolean {
+/**
+ * A repeated line is a running header/footer only when it sits alone between blank lines
+ * (or page artifacts) and could not be a cue, transition, dialogue or heading.
+ */
+function isRunningHeader(line: string, count: number, prev: string | undefined, next: string | undefined): boolean {
   return (
     count >= REPEAT_THRESHOLD &&
     wordCount(line) <= REPEAT_MAX_WORDS &&
     !CUE_SHAPED.test(line) &&
+    !line.endsWith(":") &&
     !/[.!?"')]$/.test(line) &&
-    !SCENE_PREFIX.test(line)
+    !SCENE_PREFIX.test(line) &&
+    (prev === undefined || prev === "" || isPageArtifact(prev)) &&
+    (next === undefined || next === "")
   );
+}
+
+interface Span {
+  text: string;
+  first: number;
+  last: number;
 }
 
 export function normalizeDraft(text: string): NormalizedDraft {
   const cleaned = text
     .replace(/\r\n?/g, "\n")
-    .replace(/[\t ]/g, " ")
+    .replace(/[\t ]/g, " ")
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
     .split("\n")
@@ -56,44 +87,60 @@ export function normalizeDraft(text: string): NormalizedDraft {
   for (const line of cleaned) if (line) counts.set(line, (counts.get(line) ?? 0) + 1);
 
   const dropped: string[] = [];
-  const kept: string[] = [];
-  for (const line of cleaned) {
-    if (line && (PAGE_NUMBER.test(line) || CONTINUATION.test(line) || isRunningHeader(line, counts.get(line) ?? 0))) {
+  const kept: Span[] = [];
+  cleaned.forEach((line, i) => {
+    const at = i + 1;
+    if (line && (isPageArtifact(line) || isRunningHeader(line, counts.get(line) ?? 0, cleaned[i - 1], cleaned[i + 1]))) {
       dropped.push(line);
-      continue;
+      return;
     }
     if (TRAILING_CONTD.test(line)) {
       dropped.push(" (CONT'D)");
-      kept.push(line.replace(TRAILING_CONTD, "").trimEnd());
+      kept.push({ text: line.replace(TRAILING_CONTD, "").trimEnd(), first: at, last: at });
+      return;
+    }
+    kept.push({ text: line, first: at, last: at });
+  });
+
+  const joins: HyphenJoin[] = [];
+  let spaceJoins = 0;
+  const joined: Span[] = [];
+  for (const span of kept) {
+    const prev = joined[joined.length - 1];
+    if (prev && prev.text && span.text && startsLower(span.text)) {
+      if (/[^-]-$/.test(prev.text)) {
+        const after = prev.text.slice(0, -1) + span.text;
+        joins.push({ before: `${prev.text}\n${span.text}`, after });
+        joined[joined.length - 1] = { ...prev, text: after, last: span.last };
+        continue;
+      }
+      if (!SENTENCE_END.test(prev.text) && !isAllCaps(prev.text)) {
+        spaceJoins++;
+        joined[joined.length - 1] = { ...prev, text: `${prev.text} ${span.text}`, last: span.last };
+        continue;
+      }
+    }
+    joined.push({ ...span });
+  }
+
+  const collapsed: Span[] = [];
+  for (const span of joined) {
+    const prev = collapsed[collapsed.length - 1];
+    if (span.text === "" && collapsed.length === 0) continue;
+    if (span.text === "" && prev?.text === "") {
+      prev.last = span.last;
       continue;
     }
-    kept.push(line);
+    collapsed.push(span);
   }
+  while (collapsed[collapsed.length - 1]?.text === "") collapsed.pop();
 
-  const joined: string[] = [];
-  for (const line of kept) {
-    const prev = joined[joined.length - 1];
-    if (prev && line && startsLower(line)) {
-      if (/[^-]-$/.test(prev)) {
-        joined[joined.length - 1] = prev.slice(0, -1) + line;
-        continue;
-      }
-      if (!SENTENCE_END.test(prev) && !isAllCaps(prev)) {
-        joined[joined.length - 1] = `${prev} ${line}`;
-        continue;
-      }
-    }
-    joined.push(line);
-  }
-
-  const collapsed: string[] = [];
-  for (const line of joined) {
-    if (line === "" && (collapsed.length === 0 || collapsed[collapsed.length - 1] === "")) continue;
-    collapsed.push(line);
-  }
-  while (collapsed[collapsed.length - 1] === "") collapsed.pop();
-
-  return { lines: collapsed.map((lineText, i) => ({ n: i + 1, text: lineText })), dropped };
+  return {
+    lines: collapsed.map((span, i) => ({ n: i + 1, text: span.text, sourceLine: span.first, sourceEnd: span.last })),
+    dropped,
+    joins,
+    unchanged: dropped.length === 0 && joins.length === 0 && spaceJoins === 0,
+  };
 }
 
 export type LineGuess =
@@ -125,7 +172,7 @@ const CUE_SHORT_WORDS = 2;
 const PARENTHETICAL = /^\(.*\)$/;
 const FIXED_TRANSITION = /^FADE (?:OUT|TO BLACK)\.$/;
 
-const isUpperCased = (text: string) => /\p{L}/u.test(text) && text === text.toUpperCase();
+const isUpperCased = (text: string) => /\p{L}/u.test(text) && !hasLower(text);
 
 /** The cue name without `@`, a trailing `(V.O.)` extension or `^`, or null when the shape does not fit. */
 function cueName(text: string, next: string | undefined): string | null {
@@ -179,7 +226,7 @@ export function classifyLines(lines: readonly DraftLine[]): ClassifiedLine[] {
         push("character", sure ? 0.9 : 0.7);
         inDialogue = true;
       } else {
-        const sentence = /[a-z]/.test(text) && /[.!?"]$/.test(text);
+        const sentence = hasLower(text) && /[.!?"]$/.test(text);
         push("action", sentence ? 0.9 : 0.6);
       }
     }
