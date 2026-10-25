@@ -114,3 +114,21 @@ describe("classifyLines", () => {
     expect(detectDraftKind(source, lines)).toBe("prose");
   });
 });
+
+describe("page artifacts next to cues", () => {
+  it("keeps a reply that reads like a marker or a page number", () => {
+    const result = normalizeDraft("BOB\nMore\n\nTOM\n42\n\nANA\nContinued\n");
+    expect(result.dropped).toEqual([]);
+    expect(result.lines.map((l) => l.text)).toEqual(["BOB", "More", "", "TOM", "42", "", "ANA", "Continued"]);
+  });
+
+  it("drops only the standard capitalised markers", () => {
+    const result = normalizeDraft("Mara runs.\n\n(MORE)\n\nmore\n\n(CONTINUED)\n\nCONTINUED:\n\n(cont'd)\n\n12.\n");
+    expect(result.dropped).toEqual(["(MORE)", "(CONTINUED)", "CONTINUED:", "12."]);
+    expect(result.lines.map((l) => l.text)).toEqual(["Mara runs.", "", "more", "", "(cont'd)"]);
+  });
+
+  it("still drops a page number that follows a marker", () => {
+    expect(normalizeDraft("MARA\nHold on.\n(MORE)\n2.\n").dropped).toEqual(["(MORE)", "2."]);
+  });
+});

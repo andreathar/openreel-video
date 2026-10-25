@@ -36,7 +36,8 @@ export interface NormalizedDraft {
 }
 
 const PAGE_NUMBER = /^\d{1,3}\.?$/;
-const CONTINUATION = /^\(?(CONTINUED|CONT'D|MORE)\)?:?$/i;
+/** Standard forms only, case-sensitive: a mixed-case "More" or "Continued" is somebody's line. */
+const CONTINUATION = /^\((?:MORE|CONT'D|CONTINUED)\)$|^CONTINUED:?$/;
 const TRAILING_CONTD = / \(CONT'D\)$/;
 const CUE_SHAPED = /^[\p{Lu}\p{N} '.()\-]+$/u;
 const SCENE_PREFIX = /^(INT|EXT|EST|I\/E)\b/i;
@@ -90,7 +91,10 @@ export function normalizeDraft(text: string): NormalizedDraft {
   const kept: Span[] = [];
   cleaned.forEach((line, i) => {
     const at = i + 1;
-    if (line && (isPageArtifact(line) || isRunningHeader(line, counts.get(line) ?? 0, cleaned[i - 1], cleaned[i + 1]))) {
+    // The line right under a cue is the dialogue slot: never drop it, whatever it looks like.
+    const prev = cleaned[i - 1];
+    const afterCue = !!prev && CUE_SHAPED.test(prev) && !isPageArtifact(prev);
+    if (line && !afterCue && (isPageArtifact(line) || isRunningHeader(line, counts.get(line) ?? 0, prev, cleaned[i + 1]))) {
       dropped.push(line);
       return;
     }
