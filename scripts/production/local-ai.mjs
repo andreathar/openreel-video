@@ -48,7 +48,12 @@ export async function chat(messages, { url = LLM_URL, model = VLM_MODEL, maxToke
   if (!response.ok || body.error) {
     throw new Error(`Local model error ${response.status}: ${JSON.stringify(body.error ?? body).slice(0, 300)}`);
   }
-  const message = body.choices?.[0]?.message ?? {};
+  const choice = body.choices?.[0] ?? {};
+  // Same wording as the web app, so convertDraft recognises it and falls back to rules for that chunk.
+  if (choice.finish_reason === "length") {
+    throw new Error(`The model ran out of output tokens (max_tokens ${maxTokens}). Try a shorter draft or a larger model.`);
+  }
+  const message = choice.message ?? {};
   return message.content || message.reasoning_content || "";
 }
 

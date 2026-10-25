@@ -37,9 +37,10 @@ const USAGE = `Usage: prod.mjs <command> <folder> [options]
 
   init <folder> <script.fountain> [--code HSTL] [--target kling-v4-omni]
                                      Build production.json from a screenplay (keeps existing data)
-  format-script <folder> <draft.txt|md> [--out script.fountain] [--model id] [--force]
-                                     Format any draft (prose or loose screenplay) as Fountain with the
-                                     local model; never rewrites words, flags what to review
+  format-script <folder> <draft.txt|md> [--out script.fountain] [--model id] [--no-ai] [--force]
+                                     Format any draft (prose or loose screenplay) as Fountain; the local
+                                     model only labels lines (--no-ai: rules only), never writes words;
+                                     prints dropped page artifacts and the line ranges to review
   status <folder> [--scene S001] [--status todo]
                                      Shot table
   targets                            Generators and their reference limits
@@ -141,30 +142,50 @@ const commands = {
 
   async "format-script"(folder, [draftPath], values) {
     if (!draftPath) fail("format-script needs a draft file (.txt or .md)");
-    const outPath = join(folder, values.out ?? "script.fountain");
+    const outPath = resolve(folder, values.out ?? "script.fountain");
     if (existsSync(outPath) && !values.force) fail(`${outPath} already exists; pass --force to overwrite it`);
     const text = await readFile(draftPath, "utf8");
-    const request = (p) =>
-      localAi.chat(
-        [
-          { role: "system", content: p.system },
-          { role: "user", content: p.user },
-        ],
-        {
-          model: values.model ?? localAi.VLM_MODEL,
-          maxTokens: 8000,
-          temperature: 0,
-          responseFormat: { type: "json_schema", json_schema: { name: p.schemaName, strict: true, schema: p.schema } },
-        },
-      );
-    const result = await core.convertDraft(text, { request });
-    await mkdir(folder, { recursive: true });
+    const request = values["no-ai"]
+      ? undefined
+      : (p) =>
+          localAi.chat(
+            [
+              { role: "system", content: p.system },
+              { role: "user", content: p.user },
+            ],
+            {
+              model: values.model ?? localAi.VLM_MODEL,
+              maxTokens: 8000,
+              temperature: 0,
+              responseFormat: { type: "json_schema", json_schema: { name: p.schemaName, strict: true, schema: p.schema } },
+            },
+          );
+    let result;
+    try {
+      result = await core.convertDraft(text, { request });
+    } catch (error) {
+      fail(`format-script: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await mkdir(dirname(outPath), { recursive: true });
     await writeFile(outPath, result.fountain);
     const doc = core.parseFountain(result.fountain);
-    const dialogue = doc.scenes.reduce((n, scene) => n + scene.elements.filter((e) => e.type === "dialogue").length, 0);
-    print(`${result.kind}: ${doc.scenes.length} scenes, ${dialogue} dialogue lines, ${result.addedHeadings} headings added by AI`);
-    for (const chunk of result.flagged) print(`lines ${chunk.fromLine}\u2013${chunk.toLine}: ${chunk.reason}`);
-    if (!result.check.ok) {
+    const counts = { dialogue: 0, action: 0, transition: 0 };
+    for (const scene of doc.scenes) for (const e of scene.elements) if (e.type in counts) counts[e.type]++;
+    const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+    print(
+      `${result.kind}${result.usedAI ? " (AI labels)" : " (rules only)"}: ${plural(doc.scenes.length, "scene")}, ` +
+        `${plural(counts.dialogue, "speech", "speeches")}, ${plural(counts.action, "action block")}, ` +
+        `${plural(counts.transition, "transition")}, ${plural(result.addedHeadings, "heading")} added by AI`,
+    );
+    if (doc.title) print(`title page: ${doc.title}`);
+    if (result.dropped.length) print(`dropped ${plural(result.dropped.length, "line")}: ${result.dropped.map((d) => JSON.stringify(d.trim())).join(", ")}`);
+    for (const chunk of result.flagged) {
+      const range = chunk.fromLine === chunk.toLine ? `line ${chunk.fromLine}` : `lines ${chunk.fromLine}\u2013${chunk.toLine}`;
+      print(`${range} of ${draftPath}: ${chunk.reason === "needs-ai" ? "prose needs the local model to find scenes; rendered as action" : chunk.reason}`);
+    }
+    if (result.check.ok) {
+      print("check: every word of the draft is in the result (dropped lines excepted)");
+    } else {
       for (const problem of result.check.problems) print(`check: ${problem}`);
       if (result.check.missingWords.length) print(`missing words: ${result.check.missingWords.join(" ")}`);
       if (result.check.addedWords.length) print(`added words: ${result.check.addedWords.join(" ")}`);
@@ -484,6 +505,7 @@ const { values, positionals } = parseArgs({
     frames: { type: "string" },
     force: { type: "boolean" },
     out: { type: "string" },
+    "no-ai": { type: "boolean" },
   },
 });
 const [folder, ...args] = command === "targets" ? [".", ...positionals] : positionals;

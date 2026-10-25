@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Manual quality check for `format-script`: converts each draft in
-// eval-drafts/ with the local model and compares scene headings and
-// (character, first 3 words) dialogue keys with <draft>.expected.json.
+// eval-drafts/ with the local model and compares it with <draft>.expected.json.
+// Screenplays: exact scene headings and (character, first 3 words) dialogue keys.
+// Prose: the model invents the headings, so it is scored by scene count and a
+// fuzzy location match (INT/EXT and time of day removed, remaining words compared).
 // Not part of CI. Start LM Studio and load the model first; this script never does.
 //
 //   node scripts/production/eval-format.mjs [--model id]
@@ -62,6 +64,33 @@ function overlap(found, expected) {
   return hits;
 }
 
+const TIME_OF_DAY = new Set(
+  "DAY NIGHT DAWN DUSK MORNING EVENING AFTERNOON SUNRISE SUNSET LATER CONTINUOUS MOMENTS NOITE DIA MADRUGADA TARDE MANHÃ AMANHECER NOCHE MAÑANA".split(" "),
+);
+const HEADING_PREFIX = /^(?:INT\.?\/EXT|EXT\.?\/INT|I\/E|INT|EXT|EST|INTERIOR|EXTERIOR|INTERNO|EXTERNO)\b\.?\s*/;
+
+/** Location words of a heading: no INT/EXT prefix, no time of day, no possessive 's. */
+function locationWords(heading) {
+  const rest = heading.toUpperCase().replace(/\s*\[\[.*?\]\]/g, "").trim().replace(HEADING_PREFIX, "");
+  return words(rest)
+    .map((w) => w.toUpperCase().replace(/'S$/, ""))
+    .filter((w) => !TIME_OF_DAY.has(w));
+}
+
+/** Greedy one-to-one matches where at least half of the expected location words appear in the found heading. */
+function fuzzyLocations(found, expected) {
+  const left = expected.map(locationWords);
+  let hits = 0;
+  for (const heading of found.map(locationWords)) {
+    const i = left.findIndex((want) => want && want.length && want.filter((w) => heading.includes(w)).length * 2 >= want.length);
+    if (i >= 0) {
+      hits++;
+      left[i] = null;
+    }
+  }
+  return hits;
+}
+
 const ratio = (hits, total) => (total === 0 ? "n/a " : `${((hits / total) * 100).toFixed(0)}%`.padStart(4));
 
 const rows = [];
@@ -77,23 +106,31 @@ for (const file of names) {
   const foundDialogue = doc.scenes.flatMap((s) => s.elements.filter((e) => e.type === "dialogue").map((e) => dialogueKey(e.character, e.text)));
   const wantDialogue = expected.dialogue.map(([character, text]) => dialogueKey(character, text));
 
-  const sHits = overlap(foundScenes, wantScenes);
+  const prose = result.kind === "prose";
+  const sHits = prose ? fuzzyLocations(foundScenes, wantScenes) : overlap(foundScenes, wantScenes);
   const dHits = overlap(foundDialogue, wantDialogue);
   rows.push({
     file: base,
     kind: result.kind,
     ai: result.usedAI ? "yes" : "no",
+    scenes: `${foundScenes.length}/${wantScenes.length}`,
+    match: prose ? "fuzzy" : "exact",
     sP: ratio(sHits, foundScenes.length),
     sR: ratio(sHits, wantScenes.length),
     dP: ratio(dHits, foundDialogue.length),
     dR: ratio(dHits, wantDialogue.length),
     ok: result.check.ok ? "yes" : "NO",
+    dropped: result.dropped.length,
     flags: result.flagged.length,
   });
+  if (!result.check.ok) {
+    console.error(`${base}: ${[...result.check.problems, ...result.check.missingWords.map((w) => `missing ${w}`), ...result.check.addedWords.map((w) => `added ${w}`)].join("; ")}`);
+  }
+  for (const f of result.flagged) console.error(`${base}: lines ${f.fromLine}-${f.toLine}: ${f.reason}`);
 }
 
-const header = ["draft", "kind", "ai", "scene P", "scene R", "dlg P", "dlg R", "check.ok", "flags"];
-const widths = [16, 10, 4, 8, 8, 6, 6, 9, 5];
+const header = ["draft", "kind", "ai", "scenes", "match", "scene P", "scene R", "dlg P", "dlg R", "check.ok", "dropped", "flags"];
+const widths = [16, 10, 4, 7, 6, 8, 8, 6, 6, 9, 8, 5];
 const line = (cells) => cells.map((c, i) => String(c).padEnd(widths[i])).join(" ");
 console.log(line(header));
-for (const r of rows) console.log(line([r.file, r.kind, r.ai, r.sP, r.sR, r.dP, r.dR, r.ok, r.flags]));
+for (const r of rows) console.log(line([r.file, r.kind, r.ai, r.scenes, r.match, r.sP, r.sR, r.dP, r.dR, r.ok, r.dropped, r.flags]));
