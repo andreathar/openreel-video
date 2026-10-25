@@ -38,7 +38,7 @@ export function initialFlow(savedScript?: string): ImportFlowState {
 
 export function reachable(state: ImportFlowState, step: ImportStep): boolean {
   if (step === "draft") return true;
-  if (state.fountain === "") return false;
+  if (state.fountain.trim() === "") return false;
   if (step === "script") return true;
   return parseFountain(state.fountain).scenes.length >= 1;
 }
@@ -47,7 +47,7 @@ export function importFlowReducer(s: ImportFlowState, a: ImportFlowAction): Impo
   switch (a.type) {
     case "setDraft":
       if (a.text === s.draft) return s;
-      return { ...s, draft: a.text, fountain: "", conversion: null, outcome: null };
+      return { ...s, draft: a.text, fountain: "", conversion: null, outcome: null, built: false };
     case "formatStart":
       return { ...s, formatting: true };
     case "formatAborted":
@@ -57,7 +57,8 @@ export function importFlowReducer(s: ImportFlowState, a: ImportFlowAction): Impo
       return { ...s, formatting: false, conversion, outcome, fountain: conversion.fountain, step: "script" };
     }
     case "editFountain":
-      return { ...s, fountain: a.text };
+      if (a.text.trim() === "" && s.step !== "draft") return { ...s, fountain: a.text, step: "draft", built: false };
+      return { ...s, fountain: a.text, built: false };
     case "goto":
       return reachable(s, a.step) ? { ...s, step: a.step } : s;
     case "built":

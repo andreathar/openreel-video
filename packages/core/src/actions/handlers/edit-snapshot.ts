@@ -14,6 +14,9 @@ registerActionHandler({
     const snapshot = action.params.snapshot as EditSnapshot;
     const copied = { ...JSON.parse(JSON.stringify({ ...snapshot, mediaLibrary: undefined })), mediaLibrary: { items: snapshot.mediaLibrary.items.map((item) => ({ ...item })) } };
     Object.assign(project, copied, { modifiedAt: Date.now() });
+    // JSON copy drops undefined keys, so restoring a snapshot taken before these existed must clear them.
+    if (snapshot.production === undefined) delete (project as { production?: unknown }).production;
+    if (snapshot.creation === undefined) delete (project as { creation?: unknown }).creation;
   },
   invert(action, before) { return createInverseAction(action, "project/applyEditSnapshot", { snapshot: editSnapshot(before) }); },
 });

@@ -15,6 +15,8 @@ export interface ScriptStepProps {
   onReformat: () => void;
   onOpenAISettings?: () => void;
   onNext: () => void;
+  /** Download name, e.g. `PROJ.fountain`. */
+  fileName?: string;
 }
 
 const AI_MARKER = /\s*\[\[added by AI\]\]\s*$/;
@@ -31,7 +33,7 @@ function downloadText(text: string, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onReformat, onOpenAISettings, onNext }: ScriptStepProps) {
+export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onReformat, onOpenAISettings, onNext, fileName = "script.fountain" }: ScriptStepProps) {
   const summary = useMemo(() => formatScriptSummary(summarizeScript(parseFountain(fountain))), [fountain]);
   const headings = useMemo(() => fountain.split("\n").filter((l) => HEADING.test(l.trim())), [fountain]);
   const draftLines = useMemo(() => draft.split(/\r?\n/), [draft]);
@@ -141,7 +143,7 @@ export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onRef
           size="sm"
           variant="secondary"
           icon={<Download size={14} aria-hidden />}
-          onClick={() => downloadText(fountain, "script.fountain")}
+          onClick={() => downloadText(fountain, fileName)}
         />
         <Button
           label={problems > 0 ? `Use this script (${problems} problem${problems === 1 ? "" : "s"})` : "Use this script"}

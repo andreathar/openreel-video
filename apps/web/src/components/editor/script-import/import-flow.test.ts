@@ -58,4 +58,17 @@ describe("import flow", () => {
     expect(reachable(s, "shots")).toBe(false);
     expect(reachable(s, "script")).toBe(true);
   });
+
+  it("editing after a build resets built", () => {
+    const built = importFlowReducer(initialFlow(SCRIPT), { type: "built" });
+    expect(built.built).toBe(true);
+    expect(importFlowReducer(built, { type: "editFountain", text: SCRIPT + "\nMore." }).built).toBe(false);
+    expect(importFlowReducer(built, { type: "setDraft", text: "other" }).built).toBe(false);
+  });
+
+  it("treats a whitespace-only fountain as empty and leaves the unreachable step", () => {
+    const s = initialFlow(SCRIPT);
+    expect(importFlowReducer(s, { type: "editFountain", text: "  \n " }).step).toBe("draft");
+    expect(reachable({ ...s, fountain: "  \n" }, "script")).toBe(false);
+  });
 });
