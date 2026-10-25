@@ -32,7 +32,9 @@ export async function formatDraft(text: string, conn: DirectConnection, options:
   const kind = detectDraftKind(text, classifyLines(normalizeDraft(text).lines));
   if (kind === "fountain") return { kind: "done", conversion: await convertDraft(text, { cache, signal, chunkLines }) };
   if (!connectionReady(conn)) {
-    return { kind: "done", conversion: await convertDraft(text, { cache, signal, chunkLines }), notice: "needs-ai" };
+    // Only prose needs a model; screenplays format by rules and convertDraft already flags their unsure lines.
+    const conversion = await convertDraft(text, { cache, signal, chunkLines });
+    return kind === "prose" ? { kind: "done", conversion, notice: "needs-ai" } : { kind: "done", conversion };
   }
   try {
     const conversion = await convertDraft(text, {

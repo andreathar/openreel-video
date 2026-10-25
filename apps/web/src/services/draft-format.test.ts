@@ -50,6 +50,20 @@ describe("formatDraft", () => {
     expect(out).toMatchObject({ kind: "done", notice: "needs-ai" });
   });
 
+  it("gives no notice for a screenplay without a ready connection", async () => {
+    let calls = 0;
+    const out = await formatDraft(scenes(2), conn({ apiKey: "" }), { cache: new Map(), request: async () => { calls++; return emptyReply; } });
+    expect(calls).toBe(0);
+    expect(out.kind).toBe("done");
+    expect(out).not.toHaveProperty("notice");
+    expect(out.conversion.kind).toBe("screenplay");
+  });
+
+  it("rethrows a plain Error named AbortError", async () => {
+    const err = Object.assign(new Error("stop"), { name: "AbortError" });
+    await expect(formatDraft(PROSE, conn(), { cache: new Map(), request: async () => { throw err; } })).rejects.toBe(err);
+  });
+
   it("runs three chunks in parallel for anthropic and one at a time otherwise", async () => {
     const run = async (provider: DirectConnection["provider"]) => {
       let active = 0, peak = 0;
