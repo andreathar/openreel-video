@@ -1,6 +1,6 @@
 # Script to shots: draft conversion, guided flow, AI shot planning
 
-Date: 2026-10-24 · Branch: `feat/ai-film-pipeline` · Status: draft for review
+Date: 2026-10-24 · Branch: `feat/ai-film-pipeline` · Status: approved 2026-10-25
 
 ## 1. Goal
 
@@ -231,7 +231,7 @@ One modal, three steps, with a step header ("1 Draft · 2 Script · 3 Shots").
 Later steps are reachable once the earlier one is valid.
 
 1. **Draft.**
-   - Paste or drop any text (`.fountain .txt .md .docx`*).
+   - Paste or drop any text (`.fountain .txt .md`).
    - A detected-kind badge: "Fountain screenplay", "Screenplay, needs
      formatting" or "Prose, AI will find scenes".
    - Primary button "Format script" (or "Continue" when the draft is
@@ -253,9 +253,6 @@ Later steps are reachable once the earlier one is valid.
      "Creates 8 scene markers and 23 placeholder shots".
    - After success the dialog shows "Timeline built" with
      **"Open Shot Board"** (primary) and "Close".
-
-\* `.docx` text extraction is optional (mammoth is about 70 kB gzipped).
-Leave it out unless the user wants it.
 
 The source script (Fountain) is stored next to the manifest
 (`production.json` gains an optional `script` string). Re-opening Import
@@ -427,10 +424,9 @@ Unverified and to measure on our own samples:
 - The best chunk size.
 - Kling multi-shot limits (sources disagree: 5 or 6 shots).
 
-## 11. Open questions for the user
+## 11. Decisions (2026-10-25)
 
-1. Should `.docx` import be included (adds mammoth)?
-2. Default model for conversion: whatever AI settings hold (proposed), or
-   always prefer local LM Studio and fall back to Claude?
-3. Part order: A → B → C → D (proposed). Prompt drafting (7.4) could come
-   before shot planning (7.3) if prompts matter more to you right now.
+1. No `.docx` import. Paste or drop `.fountain`, `.txt` and `.md` only.
+2. Conversion uses the connection in AI settings (Claude through the dev
+   proxy, or LM Studio). The CLI uses LM Studio (`PROD_LLM_URL`).
+3. Build order A → B → C → D, one implementation plan per part.
