@@ -1,0 +1,10 @@
+{
+  "scenes": ["INTERIOR. KITCHEN - NIGHT", "INTERIOR. STAIRWELL - NIGHT", "INTERIOR. LAMP ROOM - DAWN"],
+  "dialogue": [
+    ["MARA", "it's late he"],
+    ["TOM", "the boat is"],
+    ["MARA", "i will worry"],
+    ["MARA", "is anyone there"],
+    ["TOM", "look at that"]
+  ]
+}

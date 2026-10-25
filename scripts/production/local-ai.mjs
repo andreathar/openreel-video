@@ -36,11 +36,11 @@ export async function sampleFrames(file, count = 6, width = 384) {
   return { duration, frames };
 }
 
-export async function chat(messages, { url = LLM_URL, model = VLM_MODEL, maxTokens = 600 } = {}) {
+export async function chat(messages, { url = LLM_URL, model = VLM_MODEL, maxTokens = 600, temperature = 0.1, responseFormat } = {}) {
   const response = await fetch(`${url.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model, messages, temperature: 0.1, max_tokens: maxTokens, stream: false }),
+    body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, stream: false, ...(responseFormat ? { response_format: responseFormat } : {}) }),
   }).catch((error) => {
     throw new Error(`Local model not reachable at ${url} (${error.cause?.code ?? error.message}). Start LM Studio or set PROD_LLM_URL.`);
   });

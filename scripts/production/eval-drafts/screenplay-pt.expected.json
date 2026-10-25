@@ -1,0 +1,9 @@
+{
+  "scenes": ["INTERIOR. COZINHA - NOITE", "EXTERIOR. ESCADARIA - MADRUGADA"],
+  "dialogue": [
+    ["CONCEIÇÃO", "já é tarde"],
+    ["JOSÉ", "o barco está"],
+    ["CONCEIÇÃO", "preocupo-me quando quiser"],
+    ["JOSÉ", "olha só para"]
+  ]
+}

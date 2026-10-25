@@ -11,7 +11,8 @@ Design history and the reasoning behind each choice:
 
 ## The loop at a glance
 
-1. **Write** the script in Fountain (`.fountain`).
+1. **Write** the script in Fountain (`.fountain`), or start from any draft
+   (see *Start from any draft* below).
 2. **Import** it in the editor (rail button *Import script*) or with
    `prod.mjs init`. Each scene becomes a marker and each shot a placeholder
    clip on the `SHOTS` track, sized by the estimated length.
@@ -27,6 +28,33 @@ Design history and the reasoning behind each choice:
 8. **Review** takes with the local vision model (optional score + trim).
 9. **Select** the take per shot; the Shot Board's folder sync links the files.
 10. **Conform to takes** → **Check dialogue** → **Assemble audio** → **EDL**.
+
+## Start from any draft
+
+You do not need to write Fountain by hand. A treatment, a story in plain prose, or a
+screenplay pasted from a PDF or a word processor can be converted first.
+
+- **In the editor**: the guided import arrives in a later part of this work. Until then use the CLI.
+- **With the CLI**: `node scripts/production/prod.mjs format-script <folder> draft.txt`
+  writes `<folder>/script.fountain` (change the name with `--out`; an existing file is
+  only replaced with `--force`). Then run `prod.mjs init <folder> <folder>/script.fountain`.
+  A clean screenplay is formatted by rules alone, without the model; prose and messy
+  screenplays use the local model (LM Studio, see *Local AI*).
+- **Your words are never rewritten.** The model only says which lines are headings, action,
+  character cues and dialogue. Every line of the output is copied from the draft, page
+  numbers, `(MORE)`, `CONT'D` and running headers are dropped, and a word-by-word check
+  compares the result with the draft.
+- **`[[added by AI]]`**: prose has no scene headings, so the model may propose one for a scene
+  (for example `INT. KITCHEN - NIGHT`). It is the only text the model writes, and it is marked
+  with this note on the same line so you can find and fix it. The importer ignores the note.
+- **Review the flags.** The command prints how many scenes, dialogue lines and AI headings it
+  made, then each chunk it could not trust as `lines 12–40: reason`. Those chunks fall back to
+  the rule-based reading, so read them in the file. If the check reports `missing words` or
+  `added words`, compare those spots with the draft before importing. The command exits 0 even
+  with flags; the file is a first draft for you to review.
+
+`node scripts/production/eval-format.mjs` scores the model on three sample drafts in
+`scripts/production/eval-drafts/` (run by hand with LM Studio up; it never loads a model).
 
 ## Project folder
 
@@ -76,6 +104,7 @@ Run from the repository root: `node scripts/production/prod.mjs <command> <folde
 
 | Command | What it does |
 |---|---|
+| `format-script <folder> <draft.txt\|md> [--out script.fountain] [--model id] [--force]` | Format any draft (prose or loose screenplay) as Fountain with the local model |
 | `init <folder> <script.fountain> [--code TH] [--target id]` | Create `production.json` from a script |
 | `status <folder> [--scene S001] [--status todo]` | Shot list with status and takes |
 | `targets` | Generators and their limits |

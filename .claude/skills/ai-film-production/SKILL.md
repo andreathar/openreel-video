@@ -34,7 +34,9 @@ User guide (all commands, buttons, troubleshooting): `docs/film-production.md`. 
 
 ## Workflow
 
-0. **Start a production** (once): `prod init <folder> <script.fountain> --code <PROJ> [--target id]`
+0. **Start a production** (once). No Fountain yet? `prod format-script <folder> <draft.txt|md> [--out script.fountain] [--force]`
+   formats any draft (prose or loose screenplay) with the local model; it never rewrites words, marks AI-added
+   headings `[[added by AI]]` and prints flagged line ranges to review. Then: `prod init <folder> <script.fountain> --code <PROJ> [--target id]`
    creates `production.json`, or the user imports the script in the editor (rail *Import script*)
    and connects the same folder in the Shot Board. Script changes later: re-import in the editor;
    prompts, targets and takes of surviving shots are kept, removed shots that already have takes are kept as `orphaned`.

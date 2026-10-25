@@ -37,6 +37,9 @@ const USAGE = `Usage: prod.mjs <command> <folder> [options]
 
   init <folder> <script.fountain> [--code HSTL] [--target kling-v4-omni]
                                      Build production.json from a screenplay (keeps existing data)
+  format-script <folder> <draft.txt|md> [--out script.fountain] [--model id] [--force]
+                                     Format any draft (prose or loose screenplay) as Fountain with the
+                                     local model; never rewrites words, flags what to review
   status <folder> [--scene S001] [--status todo]
                                      Shot table
   targets                            Generators and their reference limits
@@ -134,6 +137,39 @@ const commands = {
     const manifest = core.mergeProductionManifest(existing, plan, target.id);
     await save(folder, manifest);
     print(`${manifest.projectCode}: ${plan.scenes.length} scenes, ${manifest.shots.length} shots, ${manifest.entities.length} entities`);
+  },
+
+  async "format-script"(folder, [draftPath], values) {
+    if (!draftPath) fail("format-script needs a draft file (.txt or .md)");
+    const outPath = join(folder, values.out ?? "script.fountain");
+    if (existsSync(outPath) && !values.force) fail(`${outPath} already exists; pass --force to overwrite it`);
+    const text = await readFile(draftPath, "utf8");
+    const request = (p) =>
+      localAi.chat(
+        [
+          { role: "system", content: p.system },
+          { role: "user", content: p.user },
+        ],
+        {
+          model: values.model ?? localAi.VLM_MODEL,
+          maxTokens: 8000,
+          temperature: 0,
+          responseFormat: { type: "json_schema", json_schema: { name: p.schemaName, strict: true, schema: p.schema } },
+        },
+      );
+    const result = await core.convertDraft(text, { request });
+    await mkdir(folder, { recursive: true });
+    await writeFile(outPath, result.fountain);
+    const doc = core.parseFountain(result.fountain);
+    const dialogue = doc.scenes.reduce((n, scene) => n + scene.elements.filter((e) => e.type === "dialogue").length, 0);
+    print(`${result.kind}: ${doc.scenes.length} scenes, ${dialogue} dialogue lines, ${result.addedHeadings} headings added by AI`);
+    for (const chunk of result.flagged) print(`lines ${chunk.fromLine}\u2013${chunk.toLine}: ${chunk.reason}`);
+    if (!result.check.ok) {
+      for (const problem of result.check.problems) print(`check: ${problem}`);
+      if (result.check.missingWords.length) print(`missing words: ${result.check.missingWords.join(" ")}`);
+      if (result.check.addedWords.length) print(`added words: ${result.check.addedWords.join(" ")}`);
+    }
+    print(`Wrote ${outPath}. Review it, then: prod.mjs init ${folder} ${outPath}`);
   },
 
   async status(folder, _rest, values) {
@@ -447,6 +483,7 @@ const { values, positionals } = parseArgs({
     model: { type: "string" },
     frames: { type: "string" },
     force: { type: "boolean" },
+    out: { type: "string" },
   },
 });
 const [folder, ...args] = command === "targets" ? [".", ...positionals] : positionals;
