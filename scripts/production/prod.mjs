@@ -140,11 +140,19 @@ const commands = {
     print(`${manifest.projectCode}: ${plan.scenes.length} scenes, ${manifest.shots.length} shots, ${manifest.entities.length} entities`);
   },
 
-  async "format-script"(folder, [draftPath], values) {
-    if (!draftPath) fail("format-script needs a draft file (.txt or .md)");
+  async "format-script"(folder, [draftArg], values) {
+    if (!draftArg) fail("format-script needs a draft file (.txt or .md)");
+    // Like --out, a relative draft path is taken from <folder>; the current directory is the fallback.
+    const inFolder = resolve(folder, draftArg);
+    const draftPath = existsSync(inFolder) || !existsSync(resolve(draftArg)) ? inFolder : resolve(draftArg);
     const outPath = resolve(folder, values.out ?? "script.fountain");
     if (existsSync(outPath) && !values.force) fail(`${outPath} already exists; pass --force to overwrite it`);
-    const text = await readFile(draftPath, "utf8");
+    let text;
+    try {
+      text = await readFile(draftPath, "utf8");
+    } catch (error) {
+      fail(`format-script: cannot read draft ${draftPath} (${error.code ?? error.message})`);
+    }
     const request = values["no-ai"]
       ? undefined
       : (p) =>
