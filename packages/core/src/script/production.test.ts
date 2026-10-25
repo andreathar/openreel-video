@@ -65,6 +65,25 @@ function emptyProject(): Project {
   } as unknown as Project;
 }
 
+describe("manifest script", () => {
+  it("stores a passed script and keeps it on later merges without one", () => {
+    const withScript = mergeProductionManifest(undefined, plan, undefined, "INT. A - DAY");
+    expect(withScript.script).toBe("INT. A - DAY");
+    expect(mergeProductionManifest(withScript, plan).script).toBe("INT. A - DAY");
+    expect(mergeProductionManifest(withScript, plan, undefined, "NEW").script).toBe("NEW");
+  });
+
+  it("leaves the key absent for an old manifest and round-trips it", () => {
+    const old = manifest();
+    expect("script" in old).toBe(false);
+    expect("script" in mergeProductionManifest(old, plan)).toBe(false);
+    const parsed = parseProductionManifest(serializeProductionManifest(old));
+    expect("script" in parsed).toBe(false);
+    const withScript = mergeProductionManifest(old, plan, undefined, "X");
+    expect(parseProductionManifest(serializeProductionManifest(withScript)).script).toBe("X");
+  });
+});
+
 describe("mergeProductionManifest", () => {
   it("creates shots and named entities from the breakdown", () => {
     const m = manifest();

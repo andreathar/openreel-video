@@ -216,6 +216,8 @@ export interface ProductionManifest {
   readonly defaultTargetId: string;
   readonly entities: readonly ProductionEntity[];
   readonly shots: readonly ProductionShot[];
+  /** Source Fountain text the shots were planned from, when known. */
+  readonly script?: string;
   readonly updatedAt: number;
 }
 
@@ -234,15 +236,18 @@ function plannedEntities(projectCode: string, shot: PlannedShot, location: strin
 /**
  * Creates the production manifest for a script breakdown, or merges a new
  * breakdown into an existing one. Prompts, targets, references, statuses and
- * takes survive; shots the script no longer has are dropped unless they
+ * takes survive; the source `script` is kept unless a
+ * new one is passed; shots the script no longer has are dropped unless they
  * already have takes.
  */
 export function mergeProductionManifest(
   existing: ProductionManifest | undefined,
   breakdown: ProductionBreakdown,
   defaultTargetId: string = existing?.defaultTargetId ?? DEFAULT_GENERATION_TARGET_ID,
+  script?: string,
 ): ProductionManifest {
   const code = breakdown.projectCode;
+  const keptScript = script ?? existing?.script;
   const entities = new Map((existing?.entities ?? []).map((e) => [e.code, e]));
   for (const name of breakdown.characters) {
     const entity = entityFor(code, "CHR", name);
@@ -289,6 +294,7 @@ export function mergeProductionManifest(
     defaultTargetId,
     entities: [...entities.values()],
     shots,
+    ...(keptScript !== undefined ? { script: keptScript } : {}),
     updatedAt: Date.now(),
   };
 }
@@ -523,6 +529,7 @@ export function parseProductionManifest(json: string): ProductionManifest {
     defaultTargetId: getGenerationTarget(data.defaultTargetId).id,
     entities: data.entities,
     shots: data.shots.map((s) => ({ ...s, refs: s.refs ?? EMPTY_REFS, takes: s.takes ?? [], status: SHOT_STATUSES.includes(s.status) ? s.status : "todo" })),
+    ...(typeof data.script === "string" ? { script: data.script } : {}),
     updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : Date.now(),
   };
 }
@@ -637,7 +644,8 @@ export function reconcileProductionManifests(local: ProductionManifest, remote: 
       : entity;
   });
   entities.push(...otherEntities.values());
-  return { ...base, shots: shots.map(promoteShotStatus), entities, updatedAt: Math.max(local.updatedAt, remote.updatedAt) };
+  const script = base.script ?? other.script;
+  return { ...base, ...(script !== undefined ? { script } : {}), shots: shots.map(promoteShotStatus), entities, updatedAt: Math.max(local.updatedAt, remote.updatedAt) };
 }
 
 /** A shot with a downloaded take is at least "generated". */

@@ -32,6 +32,8 @@ export interface BuildScriptTimelineOptions {
   readonly thumbnailFor?: (shot: PlannedShot, scene: PlannedScene) => string | null;
   /** Generation target for shots new to the production manifest. */
   readonly defaultTargetId?: string;
+  /** Source Fountain text to remember in the production manifest. */
+  readonly script?: string;
 }
 
 function placeholderMedia(shot: PlannedShot, thumbnailUrl: string | null): MediaItem {
@@ -85,7 +87,7 @@ export function buildScriptTimeline(
   options: BuildScriptTimelineOptions = {},
 ): Project {
   let time = options.startTime ?? 0;
-  const production = mergeProductionManifest(project.production, breakdown, options.defaultTargetId);
+  const production = mergeProductionManifest(project.production, breakdown, options.defaultTargetId, options.script);
   const statusOf = new Map(production.shots.map((s) => [s.id, s.status]));
   const markers: Marker[] = [];
   const clips: Clip[] = [];

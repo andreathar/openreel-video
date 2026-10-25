@@ -197,6 +197,11 @@ describe("buildScriptTimeline", () => {
     }, 0);
   });
 
+  it("stores the source script in the production manifest", () => {
+    expect(buildScriptTimeline(emptyProject(), plan, { script: SCRIPT }).production?.script).toBe(SCRIPT);
+    expect(buildScriptTimeline(emptyProject(), plan).production && "script" in buildScriptTimeline(emptyProject(), plan).production!).toBe(false);
+  });
+
   it("rebuilds without duplicating and keeps relinked takes", () => {
     const first = buildScriptTimeline(emptyProject(), plan);
     const relinkedId = SCRIPT_SHOT_MEDIA_PREFIX + plan.scenes[0].shots[0].id;
