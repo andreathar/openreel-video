@@ -4,6 +4,8 @@
  * prose is rejoined, so later passes see one logical line per paragraph.
  */
 
+import { parseFountain } from "./fountain";
+
 export interface DraftLine {
   /** 1-based line number in the normalized output. */
   readonly n: number;
@@ -92,4 +94,110 @@ export function normalizeDraft(text: string): NormalizedDraft {
   while (collapsed[collapsed.length - 1] === "") collapsed.pop();
 
   return { lines: collapsed.map((lineText, i) => ({ n: i + 1, text: lineText })), dropped };
+}
+
+export type LineGuess =
+  | "heading"
+  | "action"
+  | "character"
+  | "dialogue"
+  | "parenthetical"
+  | "transition"
+  | "blank";
+
+export interface ClassifiedLine extends DraftLine {
+  readonly guess: LineGuess;
+  /** 0..1; lines below {@link CONFIDENT} are candidates for AI review. */
+  readonly conf: number;
+}
+
+/** Minimum confidence at which a rule-based guess is trusted without review. */
+export const CONFIDENT = 0.8;
+
+/** Scene heading or numbered scene line in English, Portuguese, Spanish, French or German. */
+export const HEADING_PATTERN =
+  /^(?:\.(?!\.)|(?:INT\.?\/EXT|INT\/EXT|EXT\.?\/INT|I\/E|INT|EXT|EST|INTERIOR|EXTERIOR|INTERNO|EXTERNO|INTERIOR\/EXTERIOR|INT[ÉE]RIEUR|EXT[ÉE]RIEUR|INNEN|AUSSEN|AUßEN)\b[.\s:-]|(?:SCENE|SCÈNE|ESCENA|CENA|SZENE)\s+\d+\b)/i;
+
+const CUE_EXTENSION = /\s*\([^)]*\)\s*\^?$|\s*\^$/;
+const CUE_MAX_WORDS = 4;
+const CUE_MAX_LENGTH = 32;
+const CUE_SHORT_WORDS = 2;
+const PARENTHETICAL = /^\(.*\)$/;
+const FIXED_TRANSITION = /^FADE (?:OUT|TO BLACK)\.$/;
+
+const isUpperCased = (text: string) => /\p{L}/u.test(text) && text === text.toUpperCase();
+
+/** The cue name without `@`, a trailing `(V.O.)` extension or `^`, or null when the shape does not fit. */
+function cueName(text: string, next: string | undefined): string | null {
+  if (next === undefined || next === "") return null;
+  const forced = text.startsWith("@");
+  const name = (forced ? text.slice(1) : text).replace(CUE_EXTENSION, "").trim();
+  if (!name) return null;
+  if (forced) return name.toUpperCase();
+  if (wordCount(name) > CUE_MAX_WORDS || name.length > CUE_MAX_LENGTH) return null;
+  if (!isUpperCased(name) || /[.!?]$/.test(name)) return null;
+  return name;
+}
+
+function isTransition(text: string): boolean {
+  if (text.startsWith(">")) return !text.endsWith("<");
+  return (isUpperCased(text) && text.endsWith("TO:")) || FIXED_TRANSITION.test(text);
+}
+
+/** Rule-based element guess and confidence for every line; low-confidence lines are meant for AI review. */
+export function classifyLines(lines: readonly DraftLine[]): ClassifiedLine[] {
+  const textAt = (i: number): string | undefined => lines[i]?.text;
+  const afterBlank = (i: number) => i === 0 || textAt(i - 1) === "";
+
+  const cueCounts = new Map<string, number>();
+  lines.forEach((line, i) => {
+    if (!line.text || !afterBlank(i)) return;
+    const name = cueName(line.text, textAt(i + 1));
+    if (name) cueCounts.set(name, (cueCounts.get(name) ?? 0) + 1);
+  });
+
+  const out: ClassifiedLine[] = [];
+  let inDialogue = false;
+  lines.forEach((line, i) => {
+    const { text } = line;
+    const push = (guess: LineGuess, conf: number) => out.push({ ...line, guess, conf });
+
+    if (text === "") {
+      inDialogue = false;
+      push("blank", 1);
+    } else if (inDialogue) {
+      if (PARENTHETICAL.test(text)) push("parenthetical", 0.9);
+      else push("dialogue", 0.85);
+    } else if (HEADING_PATTERN.test(text)) {
+      push("heading", afterBlank(i) ? 0.95 : 0.6);
+    } else if (isTransition(text)) {
+      push("transition", 0.9);
+    } else {
+      const name = afterBlank(i) ? cueName(text, textAt(i + 1)) : null;
+      if (name) {
+        const sure = (cueCounts.get(name) ?? 0) >= 2 || wordCount(name) <= CUE_SHORT_WORDS;
+        push("character", sure ? 0.9 : 0.7);
+        inDialogue = true;
+      } else {
+        const sentence = /[a-z]/.test(text) && /[.!?"]$/.test(text);
+        push("action", sentence ? 0.9 : 0.6);
+      }
+    }
+  });
+  return out;
+}
+
+export type DraftKind = "fountain" | "screenplay" | "prose";
+
+const FOUNTAIN_CONFIDENT_SHARE = 0.8;
+
+export function detectDraftKind(source: string, lines: readonly ClassifiedLine[]): DraftKind {
+  const content = lines.filter((l) => l.guess !== "blank");
+  const confident = content.filter((l) => l.conf >= CONFIDENT).length;
+  const hasScene = parseFountain(source).scenes.some((scene) => scene.heading !== "COLD OPEN");
+  if (hasScene && content.length > 0 && confident / content.length >= FOUNTAIN_CONFIDENT_SHARE) return "fountain";
+  if (content.some((l) => l.guess === "heading") || content.filter((l) => l.guess === "character").length >= 2) {
+    return "screenplay";
+  }
+  return "prose";
 }
