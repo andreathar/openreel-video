@@ -34,7 +34,8 @@ Design history and the reasoning behind each choice:
 You do not need to write Fountain by hand. A treatment, a story in plain prose, or a
 screenplay pasted from a PDF or a word processor can be converted first.
 
-- **In the editor**: the guided import arrives in a later part of this work. Until then use the CLI.
+- **In the editor**: rail button *Import script* opens a three-step dialog, *1 Draft*, *2 Script*,
+  *3 Shots* (see *Import in the editor* below). It uses the same conversion as the CLI.
 - **With the CLI**: `node scripts/production/prod.mjs format-script <folder> draft.txt`
   writes `<folder>/script.fountain`. A relative draft path is looked up in `<folder>` first,
   then in the current directory. `--out` picks another file (a relative path is taken from
@@ -83,6 +84,56 @@ screenplay pasted from a PDF or a word processor can be converted first.
   cannot be read, the output file exists without `--force`, or the model cannot be reached or
   returns an error, the command prints the message and exits 1 without writing a file; otherwise it exits 0, even with flags or a failed check: the file is a first
   draft for you to review.
+
+### Import in the editor
+
+Rail button *Import script* opens *Import Script*. The steps at the top (*1 Draft*, *2 Script*,
+*3 Shots*) can be clicked to go back to a step you have already reached.
+
+**1 Draft.** Paste text, or drop a `.fountain`, `.txt` or `.md` file on the drop zone (if text is
+already pasted you are asked to *Replace* it or *Keep* it). A badge says what the dialog thinks it
+is:
+
+- *Fountain screenplay*: the button is *Continue*; nothing is reformatted.
+- *Screenplay, needs formatting*: *Format script*, done by rules, no AI needed.
+- *Prose, AI will find scenes*: *Format script* uses the model chosen in AI settings, and the
+  hint shows its name. Without a connection set up the prose still comes through, as action
+  paragraphs, and the next step says *Prose needs the AI assistant to find scenes* with an *Open
+  AI settings* button.
+
+*Cancel* stops a running format. If the model call fails, you get its error and the rule-based result.
+
+**2 Script.** A summary line, then your draft with line numbers on the left and, on the right, the
+scene headings found and the editable *Fountain* text. Edit the Fountain freely; later steps use
+what is in the box. Above them, anything to check:
+
+- Headings the AI added are highlighted and carry `[[added by AI]]`, with a count.
+- *Lines 12–40: check this part: reason* for chunks the importer could not trust.
+- *Removed as page clutter:* the dropped page numbers and running headers.
+- *Missing from the result* and *Added* word lists from the word check.
+
+Buttons: *Reformat* (runs the conversion again on the draft), *Copy Fountain*, *Download
+.fountain* (named after the project code, for example `TH.fountain`, or `script.fountain` when
+there is none) and *Use this script*, which shows the number of problems when the word check
+found any.
+
+**3 Shots.** Pick the *Video model*; its shot-length range sets how scenes are cut into shots. The
+*Project code* starts as the one saved in the project; changing it renames the shots (the line
+under it shows the first name, such as `TH_S001_SH01`). The table lists, per scene: *Pages*
+(hover for the eighths, for example `1 2/8`), *Est. length*, the number of shots with their
+lengths, and the cast. *Copy task list* and *CSV* export the shot list.
+
+*Build timeline* adds a marker per scene and a placeholder clip per shot on the `SHOTS` track. If
+the script was built before the button reads *Rebuild timeline*: it replaces the `SHOTS` track
+and scene markers, keeping shots already relinked to real files. It is one undo. When it
+finishes the dialog says *Timeline built*, and *Open Shot Board* takes you to prompting.
+
+The video model chosen here becomes the default generator of the new shots; change it per shot on
+the Shot Board (*Generator*).
+
+The script is saved in `production.json` (`script`), so reopening *Import script* later starts at
+step 2 with the Fountain text. The original draft and the warnings from the first formatting are
+not kept.
 
 `node scripts/production/eval-format.mjs` scores the model on three sample drafts in
 `scripts/production/eval-drafts/` (run by hand with LM Studio up; it never loads a model).

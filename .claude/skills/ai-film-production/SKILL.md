@@ -39,7 +39,8 @@ User guide (all commands, buttons, troubleshooting): `docs/film-production.md`. 
    so it never rewrites words. It marks AI-added prose headings `[[added by AI]]`, prints dropped page artifacts and
    flagged line ranges (source line numbers) to review. It exits 1 without writing when the draft cannot be read,
    the output exists without `--force`, or the model is unreachable or errors; flags and a failed word check still exit 0. Then: `prod init <folder> <script.fountain> --code <PROJ> [--target id]`
-   creates `production.json`, or the user imports the script in the editor (rail *Import script*)
+   creates `production.json`, or the user imports the script in the editor (rail *Import script*: 1 Draft, 2 Script, 3 Shots; the script is saved in `production.json` and reopening starts at step 2;
+   the video model chosen at build becomes the default generator, changeable per shot on the Shot Board)
    and connects the same folder in the Shot Board. Script changes later: re-import in the editor;
    prompts, targets and takes of surviving shots are kept, removed shots that already have takes are kept as `orphaned`.
 1. **Orient**: `prod status <folder>` (add `--status todo|prompted|queued`) and `prod entities <folder>`.
