@@ -35,6 +35,16 @@ describe("script tools", () => {
     expect(shots.every((s) => !s.linked)).toBe(true);
   });
 
+  it("keeps the imported Fountain as the production script, replacing an older one", async () => {
+    const host = new HeadlessHost(makeEmptyProject());
+    await executeTool("import_script", { fountain: SCRIPT, projectCode: "HSTL" }, host);
+    expect(host.getProject().production?.script).toBe(SCRIPT);
+
+    const revised = SCRIPT.replace("Three minutes", "Two minutes");
+    await executeTool("import_script", { fountain: revised, projectCode: "HSTL" }, host);
+    expect(host.getProject().production?.script).toBe(revised);
+  });
+
   it("tracks entities, prompts and takes in the production manifest", async () => {
     const host = new HeadlessHost(makeEmptyProject());
     await executeTool("import_script", { fountain: SCRIPT, projectCode: "HSTL" }, host);

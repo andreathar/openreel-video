@@ -128,14 +128,15 @@ function seconds(start) {
 const commands = {
   async init(folder, [scriptPath], values) {
     if (!scriptPath) fail("init needs a .fountain file");
-    const doc = core.parseFountain(await readFile(scriptPath, "utf8"));
+    const source = await readFile(scriptPath, "utf8");
+    const doc = core.parseFountain(source);
     if (doc.scenes.length === 0) fail("No scene headings found");
     const target = targetOf(values.target, core.DEFAULT_GENERATION_TARGET_ID);
     const projectCode = core.normalizeProjectCode(values.code ?? core.deriveProjectCode(doc.title ?? "PROJ"));
     const plan = core.planProduction(doc, { projectCode, profileId: target.profileId ?? core.DEFAULT_SHOT_PROFILE_ID });
     await mkdir(folder, { recursive: true });
     const existing = existsSync(join(folder, MANIFEST_FILE)) ? await load(folder) : undefined;
-    const manifest = core.mergeProductionManifest(existing, plan, target.id);
+    const manifest = core.mergeProductionManifest(existing, plan, target.id, source);
     await save(folder, manifest);
     print(`${manifest.projectCode}: ${plan.scenes.length} scenes, ${manifest.shots.length} shots, ${manifest.entities.length} entities`);
   },

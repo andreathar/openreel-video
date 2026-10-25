@@ -15794,7 +15794,7 @@ const TOOLS: RegisteredTool[] = [
       if (args.dryRun === true) return ok(`Script breakdown: ${summary}`, { projectCode, profileId, totalSeconds: plan.totalSeconds, scenes });
       const defaultTargetId = typeof args.defaultTargetId === "string" && args.defaultTargetId ? args.defaultTargetId : undefined;
       if (defaultTargetId && !GENERATION_TARGETS.some((t) => t.id === defaultTargetId)) return fail(`Unknown defaultTargetId '${defaultTargetId}'`, "INVALID_PARAMS");
-      const next = buildScriptTimeline(project, plan, { defaultTargetId });
+      const next = buildScriptTimeline(project, plan, { defaultTargetId, script: source });
       const result = await host.applyAction({
         type: "project/applyEditSnapshot",
         id: `import-script-${Date.now()}`,
