@@ -36,25 +36,51 @@ screenplay pasted from a PDF or a word processor can be converted first.
 
 - **In the editor**: the guided import arrives in a later part of this work. Until then use the CLI.
 - **With the CLI**: `node scripts/production/prod.mjs format-script <folder> draft.txt`
-  writes `<folder>/script.fountain` (change the name with `--out`; an existing file is
-  only replaced with `--force`). Then run `prod.mjs init <folder> <folder>/script.fountain`.
-  A clean screenplay is formatted by rules alone, without the model; prose and messy
-  screenplays use the local model (LM Studio, see *Local AI*).
-- **Your words are never rewritten.** The model only says which lines are headings, action,
-  character cues and dialogue. Every line of the output is copied from the draft, page
-  numbers, `(MORE)`, `CONT'D` and running headers are dropped, and a word-by-word check
-  compares the result with the draft.
-- **`[[added by AI]]`**: prose has no scene headings, so the model may propose one for a scene
-  (for example `INT. KITCHEN - NIGHT`). It is the only text the model writes, and it is marked
-  with this note on the same line so you can find and fix it. The importer ignores the note.
-- **Review the flags.** The command prints how many scenes, dialogue lines and AI headings it
-  made, then each chunk it could not trust as `lines 12–40: reason`. Those chunks fall back to
-  the rule-based reading, so read them in the file. If the check reports `missing words` or
-  `added words`, compare those spots with the draft before importing. The command exits 0 even
-  with flags; the file is a first draft for you to review.
+  writes `<folder>/script.fountain`. `--out` picks another file (a relative path is taken
+  from `<folder>`, an absolute path is used as is); an existing file is only replaced with
+  `--force`. Then run `prod.mjs init <folder> <folder>/script.fountain`.
+- **When the model is used.** A draft that is already clean Fountain (nothing to clean up, no bare
+  title line) is copied unchanged. A
+  screenplay whose every line the rules read with confidence (headings, cues, dialogue,
+  transitions) is formatted by rules alone, also after page artifacts are removed. Prose, and
+  screenplays with lines the rules are unsure of, are labelled by the local model (LM Studio,
+  see *Local AI*). `--no-ai` never calls the model: unsure lines keep the rule reading, and
+  prose comes out as action paragraphs without scene headings, flagged `needs the local model`.
+- **Your words are never rewritten.** The model only returns line numbers saying which lines are
+  headings, action, cues, parentheticals, dialogue and transitions; every line of the output is
+  copied from the draft. Before that, cleanup removes only page numbers, `(MORE)`, `(CONT'D)`
+  and `CONTINUED` markers, and a running header: a line of at most six words repeated at least
+  three times, each time alone between blank lines (or right after a page number), that is not
+  shaped like a character cue (capitals only), does not end in `:` or a sentence mark and is
+  not a heading. So a cue, `CUT TO:` or a one-word reply that repeats is kept. A line that
+  continues in lowercase after a line broken mid-sentence is rejoined to it (a word hyphenated
+  across the break becomes one word). The command prints every removed line under
+  `dropped`.
+- **The word check** compares the words of the output with the words of the file you gave it,
+  minus exactly the dropped lines. Any other difference is printed as `missing words` or
+  `added words`.
+- **Title.** A single short line (up to eight words, no closing punctuation) that is the only
+  text before the first scene heading of a screenplay is taken as the film's title and becomes the Fountain title page (`Title: …`). A first line that only looks like a
+  title-page entry, such as `Treatment: The Lighthouse Keeper`, is kept as action (`!` prefix).
+- **`[[added by AI]]`**: prose has no scene headings, so the model may propose one per scene
+  (for example `INT. KITCHEN - NIGHT`). It is the only text the model writes, and only for prose:
+  it must be one line of at most 60 characters shaped like a scene heading, or the reply is
+  rejected. It is marked with this note on the same line so you can find and fix it; the
+  importer ignores the note.
+- **Review the flags.** The command prints the draft kind, whether AI labels were used, the
+  number of scenes, speeches, action blocks, transitions and AI headings, the title page and the
+  dropped lines. It then lists each chunk it could not trust as `lines 12–40 of draft.txt: reason`,
+  in line numbers of your file. A chunk whose model reply was invalid twice, or ran out of output
+  tokens, falls back to the rule-based reading, so read those lines in the output. If the model
+  cannot be reached or returns an error, the command prints the message and exits 1 without
+  writing a file; otherwise it exits 0, even with flags or a failed check: the file is a first
+  draft for you to review.
 
 `node scripts/production/eval-format.mjs` scores the model on three sample drafts in
 `scripts/production/eval-drafts/` (run by hand with LM Studio up; it never loads a model).
+Screenplays are scored on exact scene headings and dialogue; prose on scene count and a fuzzy
+location match, since the model invents those headings. It also prints the dropped lines and
+the word check per draft.
 
 ## Project folder
 
@@ -104,7 +130,7 @@ Run from the repository root: `node scripts/production/prod.mjs <command> <folde
 
 | Command | What it does |
 |---|---|
-| `format-script <folder> <draft.txt\|md> [--out script.fountain] [--model id] [--force]` | Format any draft (prose or loose screenplay) as Fountain with the local model |
+| `format-script <folder> <draft.txt\|md> [--out script.fountain] [--model id] [--no-ai] [--force]` | Format any draft (prose or loose screenplay) as Fountain; the local model only labels lines (`--no-ai`: rules only) |
 | `init <folder> <script.fountain> [--code TH] [--target id]` | Create `production.json` from a script |
 | `status <folder> [--scene S001] [--status todo]` | Shot list with status and takes |
 | `targets` | Generators and their limits |
