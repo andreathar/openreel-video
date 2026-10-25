@@ -295,3 +295,170 @@ describe("convertDraft", () => {
     expect(result.flagged[0].reason).toBe("needs-ai");
   });
 });
+
+const PDF_SCREENPLAY = [
+  "INT. KITCHEN - NIGHT",
+  "",
+  "Rain hammers the shutters.",
+  "",
+  "MARA",
+  "It's late.",
+  "",
+  "                    2.",
+  "",
+  "TOM",
+  "(from the doorway)",
+  "The boat is fine.",
+  "",
+  "MARA (CONT'D)",
+  "I will worry.",
+  "(MORE)",
+  "",
+  "CUT TO:",
+  "",
+  "EXT. PIER - DAWN",
+  "",
+  "The storm has passed.",
+].join("\n");
+
+describe("source fidelity", () => {
+  it("keeps repeated non-ASCII cues, transitions and short lines and checks against the pasted source", async () => {
+    const block = (i: number) => `JOSÉ\nOlá ${i}, Maria.\n\nCUT TO:\n\nMARA\nNo\n\nShe waits ${i}.`;
+    const source = `INT. CASA - NOITE\n\n${[1, 2, 3].map(block).join("\n\n")}`;
+    const result = await convertDraft(source);
+    const doc = parseFountain(result.fountain);
+    expect(doc.scenes[0].elements.filter((e) => e.type === "dialogue" && e.character === "JOSÉ")).toHaveLength(3);
+    expect(doc.scenes[0].elements.filter((e) => e.type === "transition")).toHaveLength(3);
+    expect(doc.scenes[0].elements.filter((e) => e.type === "dialogue" && e.text === "No")).toHaveLength(3);
+    expect(result.dropped).toEqual([]);
+    expect(result.check.ok).toBe(true);
+  });
+
+  it("drops a true running header without failing the check, and reports it", async () => {
+    const header = "MY FILM - Draft 3";
+    const source = [header, "", "INT. KITCHEN - NIGHT", "", "Mara waits", "", header, "", "MARA", "Go.", "", header].join("\n");
+    const result = await convertDraft(source);
+    expect(result.fountain).not.toContain("Draft 3");
+    expect(result.dropped.filter((d) => d === header)).toHaveLength(3);
+    expect(result.check.ok).toBe(true);
+  });
+
+  it("fails the check for any loss other than the dropped lines", () => {
+    const source = "MY FILM - Draft 3\n\nMara drops the cup.\n\nMY FILM - Draft 3\n\nMY FILM - Draft 3";
+    const normalized = normalizeDraft(source);
+    const lines = [...normalized.lines];
+    const labels = labelsOf(el("action", [1]));
+    const ok = verifyConversion(lines, labels, renderFountain(lines, labels), { source, dropped: normalized.dropped });
+    expect(ok.ok).toBe(true);
+    const lost = verifyConversion(lines, labels, "Mara drops the.\n", { source, dropped: normalized.dropped });
+    expect(lost.missingWords).toEqual(["cup"]);
+    const undeclared = verifyConversion(lines, labels, renderFountain(lines, labels), { source, dropped: [] });
+    expect(undeclared.ok).toBe(false);
+    expect(undeclared.missingWords).toEqual(expect.arrayContaining(["film", "draft"]));
+  });
+
+  it("cleans a PDF paste with INT. headings instead of passing it through", async () => {
+    const request = vi.fn(async () => {
+      throw new Error("model must not be called");
+    });
+    const result = await convertDraft(PDF_SCREENPLAY, { request });
+    expect(result.kind).not.toBe("fountain");
+    expect(request).not.toHaveBeenCalled();
+    expect(result.fountain).not.toMatch(/\(MORE\)|CONT'D|^\s*2\.$/m);
+    const doc = parseFountain(result.fountain);
+    expect(doc.scenes.map((s) => s.heading)).toEqual(["INT. KITCHEN - NIGHT", "EXT. PIER - DAWN"]);
+    expect(doc.scenes[0].elements.filter((e) => e.type === "dialogue").map((e) => e.type === "dialogue" && e.character)).toEqual([
+      "MARA", "TOM", "MARA",
+    ]);
+    expect(result.dropped).toEqual(["2.", " (CONT'D)", "(MORE)"]);
+    expect(result.check.ok).toBe(true);
+  });
+
+  it("keeps the source line numbers in flags", async () => {
+    const source = "Rain falls on the town.\n\n\n\n  2.\nIt was a quiet morning in the\nvillage.\n\nNothing moved.";
+    const result = await convertDraft(source);
+    expect(result.flagged).toEqual([{ fromLine: 1, toLine: 9, reason: "needs-ai" }]);
+    const request = vi.fn(async () => json({ characters: [], scenes: [scene(0, "X", [el("action", [99])])] }));
+    const flagged = await convertDraft(source, { request });
+    expect(flagged.flagged[0]).toMatchObject({ fromLine: 1, toLine: 9 });
+  });
+});
+
+describe("headingText validation", () => {
+  const valid = new Set([1, 3]);
+  const reply = (headingText: string, headingLine = 0) =>
+    json({ characters: [], scenes: [scene(headingLine, headingText, [el("action", [3])])] });
+
+  it("rejects text smuggled into a heading", () => {
+    expect(parseLabels(reply("EXT. X\n\nTHE BAKER BURNS THE SHOP DOWN."), valid, { kind: "prose" })).toHaveProperty("error");
+    expect(parseLabels(reply("EXT. X AND THEN EVERYONE IN THE VILLAGE DIES IN A HORRIBLE FIRE"), valid, { kind: "prose" })).toHaveProperty("error");
+    expect(parseLabels(reply("The baker burns the shop down"), valid, { kind: "prose" })).toHaveProperty("error");
+    expect(parseLabels(reply(".BAKERY"), valid, { kind: "prose" })).toHaveProperty("error");
+    expect(parseLabels(reply("INT. BAKERY - DAWN", 1), valid, { kind: "prose" })).toHaveProperty("error");
+    expect(parseLabels(reply("INT. BAKERY - DAWN"), valid, { kind: "screenplay" })).toHaveProperty("error");
+    expect(parseLabels(reply("int. bakery - dawn"), valid, { kind: "prose" })).toHaveProperty("labels");
+    expect(parseLabels(reply("INT. BAKERY - DAWN"), valid)).toHaveProperty("labels");
+  });
+
+  it("never renders or counts an invalid heading text", async () => {
+    const lines = draft("The baker opens his shop.");
+    const labels: DraftLabels = {
+      scenes: [{ headingLine: 0, headingText: "EXT. X\n\nTHE BAKER BURNS THE SHOP DOWN.", elements: [el("action", [1])] }],
+      characters: [],
+    };
+    const fountain = renderFountain(lines, labels);
+    expect(fountain).not.toContain("BURNS");
+    const request = vi.fn(async () => json({ characters: [], scenes: [scene(0, "EXT. X\n\nTHE BAKER BURNS THE SHOP DOWN.", [el("action", [1, 3, 5, 7])])] }));
+    const result = await convertDraft(PROSE, { request });
+    expect(result.fountain).not.toContain("BURNS");
+    expect(result.addedHeadings).toBe(0);
+    expect(result.flagged).toHaveLength(1);
+  });
+});
+
+describe("title lines", () => {
+  it("forces a first line that looks like a title-page key to action", async () => {
+    const request = vi.fn(async () =>
+      json({ characters: [], scenes: [scene(0, "INT. KITCHEN - NIGHT", [el("action", [1]), el("action", [3])])] }),
+    );
+    const result = await convertDraft("Treatment: The Lighthouse Keeper\n\nMara sits alone with a cold cup of tea.", { request });
+    expect(result.fountain).toContain("!Treatment: The Lighthouse Keeper");
+    expect(parseFountain(result.fountain).titlePage).toEqual({});
+    expect(result.check.ok).toBe(true);
+  });
+
+  it("writes a lone title before the first heading as a title page", async () => {
+    const result = await convertDraft("A GUARDIÃ DO FAROL\n\nINT. COZINHA - NOITE\n\nA chuva bate nas janelas.\n\nJOSÉ\nJá é tarde.");
+    expect(result.fountain.startsWith("Title: A GUARDIÃ DO FAROL\n\n")).toBe(true);
+    const doc = parseFountain(result.fountain);
+    expect(doc.title).toBe("A GUARDIÃ DO FAROL");
+    expect(doc.scenes.map((s) => s.heading)).toEqual(["INT. COZINHA - NOITE"]);
+    expect(result.check.ok).toBe(true);
+  });
+
+  it("counts title-page values in the word check both ways", () => {
+    const lines = draft("THE KEEPER\n\nINT. KITCHEN - NIGHT\n\nMara waits.");
+    const labels: DraftLabels = {
+      titleLines: [1],
+      scenes: [{ headingLine: 3, headingText: "", elements: [el("action", [5])] }],
+      characters: [],
+    };
+    expect(verifyConversion(lines, labels, renderFountain(lines, labels)).ok).toBe(true);
+    const added = verifyConversion(lines, labels, "Title: THE KEEPER\nAuthor: Someone Else\n\n.INT. KITCHEN - NIGHT\n\nMara waits.\n");
+    expect(added.addedWords).toEqual(["someone", "else"]);
+    const missing = verifyConversion(lines, labels, ".INT. KITCHEN - NIGHT\n\nMara waits.\n");
+    expect(missing.missingWords).toEqual(["the", "keeper"]);
+  });
+});
+
+describe("truncated replies", () => {
+  it("falls back to rules for a chunk whose reply ran out of tokens", async () => {
+    const request = vi.fn(async () => {
+      throw new Error("The model ran out of output tokens while formatting. Try a shorter draft or a larger model.");
+    });
+    const result = await convertDraft(PROSE, { request });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(result.flagged).toEqual([{ fromLine: 1, toLine: 7, reason: expect.stringContaining("ran out of output tokens") }]);
+    expect(result.check.missingWords).toEqual([]);
+  });
+});

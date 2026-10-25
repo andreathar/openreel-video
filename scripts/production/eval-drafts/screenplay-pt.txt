@@ -1,6 +1,6 @@
 A GUARDIÃ DO FAROL
 
-INTERIOR. COZINHA - NOITE
+INT. COZINHA - NOITE
 
 A chuva bate nas janelas. CONCEIÇÃO, setenta anos, está sentada à mesa com um chá frio.
 
@@ -16,7 +16,7 @@ O barco está bem. Não te preocupes.
 CONCEIÇÃO
 Preocupo-me quando quiser.
 
-EXTERIOR. ESCADARIA - MADRUGADA
+EXT. ESCADARIA - MADRUGADA
 
 A tempestade passou. A luz pálida enche o vidro da lanterna.
 

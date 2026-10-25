@@ -1,5 +1,5 @@
 {
-  "scenes": ["INTERIOR. COZINHA - NOITE", "EXTERIOR. ESCADARIA - MADRUGADA"],
+  "scenes": ["INT. COZINHA - NOITE", "EXT. ESCADARIA - MADRUGADA"],
   "dialogue": [
     ["CONCEIÇÃO", "já é tarde"],
     ["JOSÉ", "o barco está"],

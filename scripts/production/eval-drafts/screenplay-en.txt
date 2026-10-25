@@ -1,6 +1,6 @@
 THE LIGHTHOUSE KEEPER
 
-INTERIOR. KITCHEN - NIGHT
+INT. KITCHEN - NIGHT
 
 Rain hammers the shutters. MARA (70s) sits at a small table with a cold cup of tea.
 
@@ -20,7 +20,7 @@ I will worry when I like.
 
 CUT TO:
 
-INTERIOR. STAIRWELL - NIGHT
+INT. STAIRWELL - NIGHT
 
 Mara climbs the narrow stairs with a lantern. Halfway up she stops to listen.
 
@@ -28,7 +28,7 @@ MARA
 Is anyone there?
 (MORE)
 
-INTERIOR. LAMP ROOM - DAWN
+INT. LAMP ROOM - DAWN
 
 The storm has passed. Pale light fills the glass.
 
