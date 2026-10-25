@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Clapperboard, Copy, Download } from "@/icons/lucide-compat";
 import {
-  DEFAULT_GENERATION_TARGET_ID,
   GENERATION_TARGETS,
   SCRIPT_SHOTS_TRACK_ID,
   SHOT_DURATION_PROFILES,
@@ -26,6 +25,10 @@ import { SCENE_COLORS, downloadText, formatSeconds, renderSlate, shotListCsv, sh
 
 export interface ShotsStepProps {
   fountain: string;
+  code: string;
+  onCode: (code: string) => void;
+  targetId: string;
+  onTarget: (id: string) => void;
   built: boolean;
   onBuilt: () => void;
   onOpenShotBoard: () => void;
@@ -39,9 +42,7 @@ function profileFor(targetId: string) {
   return SHOT_DURATION_PROFILES.find((p) => p.id === target?.profileId) ?? SHOT_DURATION_PROFILES[0];
 }
 
-export function ShotsStep({ fountain, built, onBuilt, onOpenShotBoard, onClose }: ShotsStepProps) {
-  const [codeInput, setCodeInput] = useState("");
-  const [targetId, setTargetId] = useState(DEFAULT_GENERATION_TARGET_ID);
+export function ShotsStep({ fountain, code: codeInput, onCode, targetId, onTarget, built, onBuilt, onOpenShotBoard, onClose }: ShotsStepProps) {
   const [isBuilding, setIsBuilding] = useState(false);
   const hasScriptTrack = useProjectStore((s) => s.project.timeline.tracks.some((t) => t.id === SCRIPT_SHOTS_TRACK_ID));
   const projectName = useProjectStore((s) => s.project.name);
@@ -94,14 +95,14 @@ export function ShotsStep({ fountain, built, onBuilt, onOpenShotBoard, onClose }
         <Selector
           label="Video model"
           value={targetId}
-          onChange={setTargetId}
+          onChange={onTarget}
           options={VIDEO_TARGETS.map((t) => {
             const p = SHOT_DURATION_PROFILES.find((x) => x.id === t.profileId) ?? SHOT_DURATION_PROFILES[0];
             return { value: t.id, label: `${t.label}, ${p.minSeconds}–${p.maxSeconds} s shots` };
           })}
           width={360}
         />
-        <TextInput label="Project code" value={codeInput} onChange={(v) => setCodeInput(v.toUpperCase())} placeholder={projectCode} maxLength={6} width={120} />
+        <TextInput label="Project code" value={codeInput} onChange={(v) => onCode(v.toUpperCase())} placeholder={projectCode} maxLength={6} width={120} />
         <Text type="supporting" color="secondary">{`Shots will be named ${projectCode}_S001_SH01`}</Text>
       </div>
 

@@ -63,4 +63,35 @@ describe("ScriptImportDialog", () => {
     expect(screen.getByRole("button", { name: "Use this script" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^2 Script/ })).toHaveAttribute("aria-current", "step");
   });
+
+  function seedSaved() {
+    const project = createEmptyProject("Other Name");
+    useProjectStore.setState({
+      project: { ...project, production: { version: 1, projectCode: "VLT", defaultTargetId: "x", entities: [], shots: [], script: SCRIPT, updatedAt: 0 } } as never,
+      hasOpenProject: true,
+    });
+  }
+
+  it("defaults to the saved project code and rebuilds with it", async () => {
+    seedSaved();
+    render(<ScriptImportDialog isOpen onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Use this script" }));
+    expect(await screen.findByDisplayValue("VLT")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /(Re)?build timeline/i }));
+    await screen.findByText("Timeline built");
+    const p = useProjectStore.getState().project.production!;
+    expect(p.script).toBe(SCRIPT);
+    expect(p.projectCode).toBe("VLT");
+    expect(p.shots.every((s) => s.id.startsWith("VLT_S"))).toBe(true);
+  });
+
+  it("keeps a typed code when going back to step 2 and returning", async () => {
+    seedSaved();
+    render(<ScriptImportDialog isOpen onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Use this script" }));
+    fireEvent.change(await screen.findByDisplayValue("VLT"), { target: { value: "abc" } });
+    fireEvent.click(screen.getByRole("button", { name: /^2 Script/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use this script" }));
+    expect(await screen.findByDisplayValue("ABC")).toBeInTheDocument();
+  });
 });

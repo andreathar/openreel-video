@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState, useReducer, useRef } from "react";
 import { Clapperboard } from "@/icons/lucide-compat";
 import {
+  DEFAULT_GENERATION_TARGET_ID,
+  GENERATION_TARGETS,
   classifyLines,
   deriveProjectCode,
   detectDraftKind,
@@ -53,6 +55,11 @@ export const ScriptImportDialog: React.FC<ScriptImportDialogProps> = ({ isOpen, 
   const abortRef = useRef<AbortController | null>(null);
   const projectName = useProjectStore((s) => s.project.name);
   const savedCode = useProjectStore((s) => s.project.production?.projectCode);
+  const [codeInput, setCodeInput] = useState(() => useProjectStore.getState().project.production?.projectCode ?? "");
+  const [targetId, setTargetId] = useState(() => {
+    const saved = useProjectStore.getState().project.production?.defaultTargetId;
+    return GENERATION_TARGETS.some((t) => t.id === saved && t.output === "video") ? (saved as string) : DEFAULT_GENERATION_TARGET_ID;
+  });
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -92,9 +99,10 @@ export const ScriptImportDialog: React.FC<ScriptImportDialogProps> = ({ isOpen, 
 
   const fileName = useMemo(() => {
     const title = state.fountain.trim() ? parseFountain(state.fountain).title : undefined;
-    const code = savedCode || (deriveProjectCode(title ?? projectName ?? "") ? normalizeProjectCode(deriveProjectCode(title ?? projectName ?? "")) : "");
-    return code ? `${code}.fountain` : "script.fountain";
-  }, [state.fountain, savedCode, projectName]);
+    const derived = deriveProjectCode(title ?? projectName ?? "");
+    const code = codeInput || savedCode || (derived ? normalizeProjectCode(derived) : "");
+    return code ? `${normalizeProjectCode(code)}.fountain` : "script.fountain";
+  }, [state.fountain, codeInput, savedCode, projectName]);
 
   const conversion = state.conversion ?? savedConversion(state.fountain);
   const goto = (step: ImportStep) => dispatch({ type: "goto", step });
@@ -141,6 +149,10 @@ export const ScriptImportDialog: React.FC<ScriptImportDialogProps> = ({ isOpen, 
             {state.step === "shots" && (
               <ShotsStep
                 fountain={state.fountain}
+                code={codeInput}
+                onCode={setCodeInput}
+                targetId={targetId}
+                onTarget={setTargetId}
                 built={state.built}
                 onBuilt={() => dispatch({ type: "built" })}
                 onOpenShotBoard={openShotBoard}
