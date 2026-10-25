@@ -477,3 +477,51 @@ describe("rules-only flags", () => {
     for (const l of unsure) expect(flaggedText).toContain(l.text);
   });
 });
+
+describe("Fountain title pages", () => {
+  const TITLED = "Title: X\nAuthor: Me\n\nINT. A - DAY\n\nBob runs.\n\nMARA\nHi.\n";
+
+  it("keeps a real title page on a clean Fountain draft", async () => {
+    const result = await convertDraft(TITLED);
+    const doc = parseFountain(result.fountain);
+    expect(doc.titlePage).toEqual({ title: "X", author: "Me" });
+    expect(doc.scenes.map((s) => s.heading)).toEqual(["INT. A - DAY"]);
+    expect(result.fountain).not.toContain("!Title");
+    expect(result.check.ok).toBe(true);
+  });
+
+  it("keeps a real title page when the draft needs cleanup", async () => {
+    const source = TITLED.replace("Bob runs.\n", "Bob runs.\n\n2.\n");
+    const result = await convertDraft(source);
+    expect(result.kind).toBe("screenplay");
+    expect(result.dropped).toEqual(["2."]);
+    const doc = parseFountain(result.fountain);
+    expect(doc.titlePage).toEqual({ title: "X", author: "Me" });
+    expect(doc.scenes.map((s) => s.heading)).toEqual(["INT. A - DAY"]);
+    expect(result.fountain.startsWith("Title: X\nAuthor: Me\n\n")).toBe(true);
+    expect(result.check.ok).toBe(true);
+    expect(result.flagged).toEqual([]);
+  });
+
+  it("forces an unknown key line to action, also inside a key block", async () => {
+    const result = await convertDraft("Logline: A keeper waits.\n\n12.\n\nINT. A - DAY\n\nBob runs.\n");
+    expect(result.fountain.startsWith("!Logline: A keeper waits.")).toBe(true);
+    expect(parseFountain(result.fountain).titlePage).toEqual({});
+    expect(result.check.ok).toBe(true);
+  });
+
+  it("leaves a lone mixed-case word before the first heading as action", async () => {
+    const result = await convertDraft("Darkness\n\n12.\n\nINT. A - DAY\n\nBob runs.\n");
+    expect(result.fountain).not.toContain("Title:");
+    expect(result.fountain).toContain("Darkness");
+    expect(result.check.ok).toBe(true);
+  });
+
+  it("keeps replies that read like markers in the speech", async () => {
+    const result = await convertDraft("INT. A - DAY\n\nBOB\nMore\n\nTOM\n42\n\n3.\n");
+    const speeches = parseFountain(result.fountain).scenes.flatMap((s) => s.elements).filter((e) => e.type === "dialogue");
+    expect(speeches.map((e) => [e.type === "dialogue" ? e.character : "", e.text])).toEqual([["BOB", "More"], ["TOM", "42"]]);
+    expect(result.dropped).toEqual(["3."]);
+    expect(result.check.ok).toBe(true);
+  });
+});

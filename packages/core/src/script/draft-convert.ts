@@ -63,6 +63,14 @@ const FORCE_ACTION_START = /^(?:[.@>~=#]|\[\[)/;
 /** Same as the Fountain parser's title-page key; a first line like this would be read as a title page. */
 const TITLE_KEY = /^([A-Za-z][A-Za-z ]*):\s*(.*)$/;
 const MAX_ADDED_HEADING = 60;
+/** Title-page keys `parseFountain` reads; any other `Key: value` first line is forced to action. */
+const FOUNTAIN_TITLE_KEYS = new Set([
+  "title", "credit", "author", "authors", "source", "draft date", "date", "contact", "copyright", "notes", "revision",
+]);
+const knownTitleKey = (text: string) => {
+  const match = TITLE_KEY.exec(text);
+  return match ? FOUNTAIN_TITLE_KEYS.has(match[1].trim().toLowerCase()) : false;
+};
 const TITLE_MAX_WORDS = 8;
 const TITLE_MAX_LENGTH = 60;
 
@@ -156,7 +164,7 @@ export function labelsFromRules(lines: readonly ClassifiedLine[]): DraftLabels {
 /** Prefix that stops a plain action line being read as a heading, cue, transition or other markup. */
 function actionLine(text: string, first = false): string {
   const misread =
-    (first && TITLE_KEY.test(text)) ||
+    (first && TITLE_KEY.test(text) && !knownTitleKey(text)) ||
     HEADING_PATTERN.test(text) ||
     (!hasLowercase(text) && hasLetter(text)) ||
     text.endsWith("TO:") ||
@@ -195,8 +203,10 @@ export function renderFountain(lines: readonly DraftLine[], labels: DraftLabels)
     lastAt = Math.max(lastAt, at);
   };
 
-  const titleText = [...titles].sort((a, b) => a - b).map(textOf).filter(Boolean).join(" ");
-  if (titleText) add(-1, `Title: ${titleText}`);
+  const titleTexts = [...titles].sort((a, b) => a - b).map(textOf).filter(Boolean);
+  // A Fountain title page is copied line for line; a bare title line becomes `Title: …`.
+  if (titleTexts.length && knownTitleKey(titleTexts[0])) add(-1, titleTexts.join("\n"));
+  else if (titleTexts.length) add(-1, `Title: ${titleTexts.join(" ")}`);
 
   for (const scene of labels.scenes) {
     const firstLine = Math.min(...scene.elements.flatMap((el) => [...el.lines, ...(el.cueLine ? [el.cueLine] : [])]));
@@ -340,6 +350,12 @@ export function verifyConversion(
     }
   } else {
     sourceCounts = tally(lines.flatMap((l) => words(l.text)));
+  }
+  // Copied title-page keys (`Title:`, `Author:`) are syntax, not script words; their values are counted above.
+  const titleByN = new Map(lines.map((l) => [l.n, l.text]));
+  for (const n of labels.titleLines ?? []) {
+    const match = TITLE_KEY.exec(titleByN.get(n) ?? "");
+    if (match && knownTitleKey(match[0])) removeWords(sourceCounts, words(match[1]));
   }
   const missingWords = difference(sourceCounts, resultCounts);
   const addedWords = difference(resultCounts, sourceCounts);
@@ -660,8 +676,28 @@ export const TRUNCATED_REPLY = "ran out of output tokens";
 const isTruncation = (error: unknown) => error instanceof Error && error.message.includes(TRUNCATED_REPLY);
 
 /**
- * A lone short line before the first heading of a screenplay (the film's title): it is the only
- * non-blank line there, has at most a few words and does not read as a sentence, cue extension or transition.
+ * Leading Fountain title page: the first block of lines (up to a blank line) where every line is a
+ * known `Key: value` title-page entry, or a value line under a key left empty (`Title:` then `BIG FISH`).
+ */
+function titlePageLinesOf(lines: readonly DraftLine[]): number[] {
+  const out: number[] = [];
+  let openKey = false;
+  for (const line of lines) {
+    if (line.text === "") return out.length && lines[out.length]?.text === "" ? out : [];
+    if (knownTitleKey(line.text)) {
+      openKey = TITLE_KEY.exec(line.text)?.[2].trim() === "";
+    } else if (!openKey || TITLE_KEY.test(line.text) || HEADING_PATTERN.test(line.text)) {
+      return [];
+    }
+    out.push(line.n);
+  }
+  return [];
+}
+
+/**
+ * A lone short line before the first heading of a screenplay that reads as the film's title: the only
+ * non-blank line there, in capitals, two to eight words, not a sentence, cue extension, key or transition.
+ * Anything less sure (`Darkness`) stays action.
  */
 function titleLineOf(classified: readonly ClassifiedLine[]): number | undefined {
   const firstHeading = classified.findIndex((l) => l.guess === "heading");
@@ -670,7 +706,9 @@ function titleLineOf(classified: readonly ClassifiedLine[]): number | undefined 
   if (before.length !== 1) return undefined;
   const [line] = before;
   const text = line.text;
-  if (text.length > TITLE_MAX_LENGTH || (text.match(/\S+/g) ?? []).length > TITLE_MAX_WORDS) return undefined;
+  const wordTotal = (text.match(/\S+/g) ?? []).length;
+  if (text.length > TITLE_MAX_LENGTH || wordTotal > TITLE_MAX_WORDS || wordTotal < 2) return undefined;
+  if (hasLowercase(text) || !hasLetter(text)) return undefined;
   if (/[.!?:;,]$/.test(text) || TITLE_KEY.test(text) || /^[.@>~=#!(\[]/.test(text)) return undefined;
   if (line.guess === "transition" || HEADING_PATTERN.test(text)) return undefined;
   return line.n;
@@ -684,7 +722,9 @@ export async function convertDraft(text: string, options: ConvertDraftOptions = 
 
   const normalized = normalizeDraft(text);
   const { lines, dropped, joins } = normalized;
-  const allClassified = classifyLines(lines);
+  // A Fountain title page is copied as is and kept out of classification and labelling.
+  const titlePage = new Set(titlePageLinesOf(lines));
+  const allClassified = classifyLines(titlePage.size ? lines.map((l) => (titlePage.has(l.n) ? { n: l.n, text: "" } : l)) : lines);
   const detected = detectDraftKind(text, allClassified);
   const ruleLabelsAll = labelsFromRules(allClassified);
   const byN = new Map(lines.map((l) => [l.n, l]));
@@ -692,7 +732,7 @@ export async function convertDraft(text: string, options: ConvertDraftOptions = 
   const sourceTo = (n: number) => byN.get(n)?.sourceEnd ?? byN.get(n)?.sourceLine ?? n;
   const lastLine = lines.length ? lines[lines.length - 1].n : 0;
 
-  const titleLine = detected === "prose" ? undefined : titleLineOf(allClassified);
+  const titleLine = detected === "prose" || titlePage.size ? undefined : titleLineOf(allClassified);
 
   // Pass a Fountain draft through untouched only when cleanup changed nothing (and there is no bare
   // title line to turn into a title page); otherwise the cleaned lines are rendered like any screenplay.
@@ -703,7 +743,7 @@ export async function convertDraft(text: string, options: ConvertDraftOptions = 
       fountain: text,
       kind: detected,
       usedAI: false,
-      labels: ruleLabelsAll,
+      labels: titlePage.size ? { ...ruleLabelsAll, titleLines: [...titlePage] } : ruleLabelsAll,
       check: { ok: problems.length === 0, problems, missingWords: [], addedWords: [] },
       flagged: [],
       addedHeadings: 0,
@@ -802,7 +842,8 @@ export async function convertDraft(text: string, options: ConvertDraftOptions = 
     labels = mergeChunks(results as DraftLabels[]);
   }
 
-  if (titleLine !== undefined) labels = { ...labels, titleLines: [titleLine] };
+  if (titlePage.size) labels = { ...labels, titleLines: [...titlePage] };
+  else if (titleLine !== undefined) labels = { ...labels, titleLines: [titleLine] };
   const fountain = renderFountain(lines, labels);
   return {
     fountain,
