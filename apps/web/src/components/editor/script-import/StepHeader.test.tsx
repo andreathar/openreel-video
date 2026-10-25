@@ -21,4 +21,17 @@ describe("StepHeader", () => {
     fireEvent.click(screen.getByRole("button", { name: "3 Shots" }));
     expect(onGoto).toHaveBeenCalledWith("shots");
   });
+
+  it("says why a disabled step cannot be opened", () => {
+    render(<StepHeader state={initialFlow()} onGoto={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "2 Script" })).toHaveAttribute("title", "Format a draft first");
+    expect(screen.getByRole("button", { name: "3 Shots" })).toHaveAccessibleDescription("Format a draft first");
+  });
+
+  it("announces the current step", () => {
+    const { rerender } = render(<StepHeader state={initialFlow()} onGoto={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Step 1 of 3: Draft");
+    rerender(<StepHeader state={initialFlow("INT. ROOM - DAY\n\nMARA enters.\n")} onGoto={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Step 2 of 3: Script");
+  });
 });

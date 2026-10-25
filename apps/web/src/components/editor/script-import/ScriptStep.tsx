@@ -17,6 +17,9 @@ export interface ScriptStepProps {
   onNext: () => void;
   /** Download name, e.g. `PROJ.fountain`. */
   fileName?: string;
+  /** A format run is in flight: the Fountain is read-only and Cancel stops the run. */
+  formatting?: boolean;
+  onCancel?: () => void;
 }
 
 const AI_MARKER = /\s*\[\[added by AI\]\]\s*$/;
@@ -33,8 +36,22 @@ function downloadText(text: string, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onReformat, onOpenAISettings, onNext, fileName = "script.fountain" }: ScriptStepProps) {
-  const summary = useMemo(() => formatScriptSummary(summarizeScript(parseFountain(fountain))), [fountain]);
+export function ScriptStep({
+  draft,
+  fountain,
+  conversion,
+  outcome,
+  onEdit,
+  onReformat,
+  onOpenAISettings,
+  onNext,
+  fileName = "script.fountain",
+  formatting = false,
+  onCancel,
+}: ScriptStepProps) {
+  const doc = useMemo(() => parseFountain(fountain), [fountain]);
+  const summary = useMemo(() => formatScriptSummary(summarizeScript(doc)), [doc]);
+  const hasScenes = doc.scenes.length > 0;
   const headings = useMemo(() => fountain.split("\n").filter((l) => HEADING.test(l.trim())), [fountain]);
   const draftLines = useMemo(() => draft.split(/\r?\n/), [draft]);
   const { check } = conversion;
@@ -53,6 +70,11 @@ export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onRef
   return (
     <div className="flex flex-col gap-3">
       <Text type="supporting">{summary}</Text>
+      {formatting && (
+        <div role="status" aria-busy="true" className="flex items-center gap-2 rounded-md border border-border p-2 text-sm">
+          <span className="flex-1">Formatting your draft… The script below is read-only until it finishes.</span>
+        </div>
+      )}
 
       {outcome?.kind === "done" && outcome.notice === "needs-ai" && (
         <div role="status" className="flex items-center gap-2 rounded-md border border-border p-2 text-sm">
@@ -131,12 +153,13 @@ export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onRef
               )}
             </ul>
           )}
-          <TextArea label="Fountain" value={fountain} onChange={onEdit} rows={16} width="100%" />
+          <TextArea label="Fountain" value={fountain} onChange={onEdit} readOnly={formatting} rows={16} width="100%" />
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button label="Reformat" size="sm" variant="secondary" onClick={onReformat} />
+        <Button label={formatting ? "Formatting…" : "Reformat"} size="sm" variant="secondary" isDisabled={formatting} onClick={onReformat} />
+        {formatting && <Button label="Cancel" size="sm" variant="ghost" onClick={onCancel} />}
         <Button label="Copy Fountain" size="sm" variant="secondary" icon={<Copy size={14} aria-hidden />} onClick={() => void copy()} />
         <Button
           label="Download .fountain"
@@ -149,8 +172,15 @@ export function ScriptStep({ draft, fountain, conversion, outcome, onEdit, onRef
           label={problems > 0 ? `Use this script (${problems} problem${problems === 1 ? "" : "s"})` : "Use this script"}
           size="sm"
           variant="primary"
+          isDisabled={!hasScenes || formatting}
+          aria-describedby={hasScenes ? undefined : "script-step-no-scenes"}
           onClick={onNext}
         />
+        {!hasScenes && (
+          <Text type="supporting" color="secondary" id="script-step-no-scenes">
+            No scene headings found. Start scenes with INT. / EXT. or a leading period.
+          </Text>
+        )}
       </div>
     </div>
   );

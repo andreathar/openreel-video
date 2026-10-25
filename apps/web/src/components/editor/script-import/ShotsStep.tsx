@@ -5,9 +5,7 @@ import {
   SCRIPT_SHOTS_TRACK_ID,
   SHOT_DURATION_PROFILES,
   buildScriptTimeline,
-  deriveProjectCode,
   formatEighths,
-  normalizeProjectCode,
   parseFountain,
   planProduction,
 } from "@openreel/core";
@@ -21,11 +19,14 @@ import {
 import { useProjectStore } from "../../../stores/project-store";
 import { toast } from "../../../stores/notification-store";
 import { cloneEditSnapshot } from "../../../services/agent/editing-session";
+import { effectiveProjectCode } from "./import-flow";
 import { SCENE_COLORS, downloadText, formatSeconds, renderSlate, shotListCsv, shotListMarkdown } from "./shot-list-export";
 
 export interface ShotsStepProps {
   fountain: string;
   code: string;
+  /** Code saved in the project; used when the code field is empty. */
+  savedCode?: string;
   onCode: (code: string) => void;
   targetId: string;
   onTarget: (id: string) => void;
@@ -42,13 +43,13 @@ function profileFor(targetId: string) {
   return SHOT_DURATION_PROFILES.find((p) => p.id === target?.profileId) ?? SHOT_DURATION_PROFILES[0];
 }
 
-export function ShotsStep({ fountain, code: codeInput, onCode, targetId, onTarget, built, onBuilt, onOpenShotBoard, onClose }: ShotsStepProps) {
+export function ShotsStep({ fountain, code: codeInput, savedCode, onCode, targetId, onTarget, built, onBuilt, onOpenShotBoard, onClose }: ShotsStepProps) {
   const [isBuilding, setIsBuilding] = useState(false);
   const hasScriptTrack = useProjectStore((s) => s.project.timeline.tracks.some((t) => t.id === SCRIPT_SHOTS_TRACK_ID));
   const projectName = useProjectStore((s) => s.project.name);
 
   const doc = useMemo(() => (fountain.trim() ? parseFountain(fountain) : null), [fountain]);
-  const projectCode = normalizeProjectCode(codeInput || deriveProjectCode(doc?.title ?? projectName ?? "") || "PROJ");
+  const projectCode = effectiveProjectCode({ typed: codeInput, saved: savedCode, title: doc?.title, projectName });
   const profile = profileFor(targetId);
   const plan = useMemo(
     () => (doc && doc.scenes.length ? planProduction(doc, { projectCode, profileId: profile.id }) : null),
@@ -85,8 +86,12 @@ export function ShotsStep({ fountain, code: codeInput, onCode, targetId, onTarge
 
   const handleCopyList = useCallback(async () => {
     if (!plan) return;
-    await navigator.clipboard.writeText(shotListMarkdown(plan, profile.label));
-    toast.success("Shot list copied", "Markdown task list on the clipboard");
+    try {
+      await navigator.clipboard.writeText(shotListMarkdown(plan, profile.label));
+      toast.success("Shot list copied", "Markdown task list on the clipboard");
+    } catch {
+      toast.error("Copy failed", "The browser blocked clipboard access");
+    }
   }, [plan, profile.label]);
 
   return (
@@ -172,7 +177,11 @@ export function ShotsStep({ fountain, code: codeInput, onCode, targetId, onTarge
             {`Creates ${plan.scenes.length} scene markers and ${shotCount} placeholder shots`}
           </Text>
         )}
-        {built && <Text type="body" weight="semibold" className="mr-auto">Timeline built</Text>}
+        {built && (
+          <Text type="body" weight="semibold" className="mr-auto" role="status">
+            Timeline built
+          </Text>
+        )}
         {built ? (
           <Button label="Open Shot Board" variant="primary" size="sm" onClick={onOpenShotBoard} />
         ) : (

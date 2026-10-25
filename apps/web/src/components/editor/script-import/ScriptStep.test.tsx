@@ -24,6 +24,8 @@ function setup(over: { conversion?: DraftConversion; outcome?: FormatOutcome | n
     conversion,
     outcome: over.outcome ?? ({ kind: "done", conversion } as FormatOutcome),
     onEdit: vi.fn(), onReformat: vi.fn(), onOpenAISettings: vi.fn(), onNext: vi.fn(),
+    formatting: over.formatting === true,
+    onCancel: (over.onCancel as (() => void) | undefined) ?? vi.fn(),
   };
   render(<ScriptStep {...props} />);
   return props;
@@ -96,5 +98,24 @@ describe("ScriptStep", () => {
     expect(p.onNext).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Reformat" }));
     expect(p.onReformat).toHaveBeenCalled();
+  });
+
+  it("is read-only with a busy state and Cancel while formatting", () => {
+    const onCancel = vi.fn();
+    setup({ formatting: true, onCancel });
+    expect(screen.getByLabelText("Fountain")).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "Formatting…" })).toBeDisabled();
+    expect(screen.getByText(/Formatting your draft/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it("disables Use this script with a reason when there are no scenes", () => {
+    const p = setup({ fountain: "Title: Untitled\n" });
+    const use = screen.getByRole("button", { name: /Use this script/ });
+    expect(use).toBeDisabled();
+    expect(use).toHaveAccessibleDescription(/No scene headings found/);
+    fireEvent.click(use);
+    expect(p.onNext).not.toHaveBeenCalled();
   });
 });
