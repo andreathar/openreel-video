@@ -725,7 +725,18 @@ export async function convertDraft(text: string, options: ConvertDraftOptions = 
   let usedAI = false;
 
   if (!request || !needsModel) {
-    if (!request && kind === "prose" && lastLine) flagged.push({ fromLine: sourceFrom(1), toLine: sourceTo(lastLine), reason: "needs-ai" });
+    if (!request && kind === "prose" && lastLine) {
+      flagged.push({ fromLine: sourceFrom(1), toLine: sourceTo(lastLine), reason: "needs-ai" });
+    } else if (!request) {
+      // Without a model, tell the user which spans are the rules' guess (runs of unsure lines, blanks between allowed).
+      const runs: { first: number; last: number }[] = [];
+      for (const line of content.filter((l) => l.conf < CONFIDENT)) {
+        const run = runs[runs.length - 1];
+        if (run && line.n <= run.last + 2) run.last = line.n;
+        else runs.push({ first: line.n, last: line.n });
+      }
+      for (const run of runs) flagged.push({ fromLine: sourceFrom(run.first), toLine: sourceTo(run.last), reason: "rules-guess" });
+    }
   } else {
     usedAI = true;
     const chunks = chunkDraft(classified, limit);

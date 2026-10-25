@@ -44,7 +44,7 @@ screenplay pasted from a PDF or a word processor can be converted first.
   screenplay whose every line the rules read with confidence (headings, cues, dialogue,
   transitions) is formatted by rules alone, also after page artifacts are removed. Prose, and
   screenplays with lines the rules are unsure of, are labelled by the local model (LM Studio,
-  see *Local AI*). `--no-ai` never calls the model: unsure lines keep the rule reading, and
+  see *Local AI*). `--no-ai` never calls the model: unsure lines keep the rule reading and are flagged, and
   prose comes out as action paragraphs without scene headings, flagged `needs the local model`.
 - **Your words are never rewritten.** The model only returns line numbers saying which lines are
   headings, action, cues, parentheticals, dialogue and transitions; every line of the output is

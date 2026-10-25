@@ -462,3 +462,18 @@ describe("truncated replies", () => {
     expect(result.check.missingWords).toEqual([]);
   });
 });
+
+describe("rules-only flags", () => {
+  it("flags screenplay lines the rules were unsure of when no model is given, in source lines", async () => {
+    const source = "INT. KITCHEN - NIGHT\n\n\n\nMara drops the cup.\n\n12.\n\nMARA\nIt's late.\n\nThe lights fail\n\nTOM\nGo.";
+    const lines = draft(source);
+    const unsure = classifyLines(lines).filter((l) => l.guess !== "blank" && l.conf < 0.8);
+    expect(unsure.length).toBeGreaterThan(0);
+    const result = await convertDraft(source);
+    expect(result.flagged.length).toBeGreaterThan(0);
+    for (const f of result.flagged) expect(f.reason).toBe("rules-guess");
+    const sourceLines = source.split("\n");
+    const flaggedText = result.flagged.flatMap((f) => sourceLines.slice(f.fromLine - 1, f.toLine));
+    for (const l of unsure) expect(flaggedText).toContain(l.text);
+  });
+});

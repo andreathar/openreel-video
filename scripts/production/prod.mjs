@@ -181,7 +181,7 @@ const commands = {
     if (result.dropped.length) print(`dropped ${plural(result.dropped.length, "line")}: ${result.dropped.map((d) => JSON.stringify(d.trim())).join(", ")}`);
     for (const chunk of result.flagged) {
       const range = chunk.fromLine === chunk.toLine ? `line ${chunk.fromLine}` : `lines ${chunk.fromLine}\u2013${chunk.toLine}`;
-      print(`${range} of ${draftPath}: ${chunk.reason === "needs-ai" ? "prose needs the local model to find scenes; rendered as action" : chunk.reason}`);
+      print(`${range} of ${draftPath}: ${chunk.reason === "needs-ai" ? "prose needs the local model to find scenes; rendered as action" : chunk.reason === "rules-guess" ? "the rules were unsure here (no model used); check these lines" : chunk.reason}`);
     }
     if (result.check.ok) {
       print("check: every word of the draft is in the result (dropped lines excepted)");
