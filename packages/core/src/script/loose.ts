@@ -118,7 +118,7 @@ export const CONFIDENT = 0.8;
 export const HEADING_PATTERN =
   /^(?:\.(?!\.)|(?:INT\.?\/EXT|INT\/EXT|EXT\.?\/INT|I\/E|INT|EXT|EST|INTERIOR|EXTERIOR|INTERNO|EXTERNO|INTERIOR\/EXTERIOR|INT[ÉE]RIEUR|EXT[ÉE]RIEUR|INNEN|AUSSEN|AUßEN)\b[.\s:-]|(?:SCENE|SCÈNE|ESCENA|CENA|SZENE)\s+\d+\b)/i;
 
-const CUE_EXTENSION = /\s*\([^)]*\)\s*\^?$|\s*\^$/;
+export const CUE_EXTENSION = /\s*\([^)]*\)\s*\^?$|\s*\^$/;
 const CUE_MAX_WORDS = 4;
 const CUE_MAX_LENGTH = 32;
 const CUE_SHORT_WORDS = 2;
