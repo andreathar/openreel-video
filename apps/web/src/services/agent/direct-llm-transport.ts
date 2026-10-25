@@ -24,25 +24,27 @@ export function makeDirectBYOKClient(options: DirectConnection): LLMClient {
       if (options.signal?.aborted) throw error;
       throw new Error("The model endpoint could not be reached. Check its URL and browser CORS support. No proxy or security bypass is used.");
     }
-    // Surface local endpoint errors directly; for remote endpoints, avoid echoing credentials.
+    // Surface the endpoint's JSON error message; remote messages are redacted so a credential echo never reaches the UI.
     if (!res.ok) {
       let detail = "";
-      if (isLocal) {
-        try {
-          const rawErr = await res.json() as Record<string, any>;
-          if (typeof rawErr?.error === "string") {
-            try {
-              const inner = JSON.parse(rawErr.error);
-              detail = inner?.error?.message || rawErr.error;
-            } catch {
-              detail = rawErr.error;
-            }
-          } else if (rawErr?.error?.message) {
-            detail = rawErr.error.message;
+      try {
+        const rawErr = await res.json() as Record<string, any>;
+        if (typeof rawErr?.error === "string") {
+          try {
+            const inner = JSON.parse(rawErr.error);
+            detail = inner?.error?.message || rawErr.error;
+          } catch {
+            detail = rawErr.error;
           }
-        } catch {
-          // ignore json parse error
+        } else if (rawErr?.error?.message) {
+          detail = [rawErr.error.type, rawErr.error.message].filter((part) => typeof part === "string").join(": ");
         }
+      } catch {
+        // ignore json parse error
+      }
+      if (detail && !isLocal) {
+        if (options.apiKey) detail = detail.split(options.apiKey).join("[redacted]");
+        detail = detail.replace(/\b(?:sk|key)[-_][A-Za-z0-9_*.-]{6,}/g, "[redacted]").slice(0, 300);
       }
       const safeMessage = detail
         ? `Model endpoint returned HTTP ${res.status}: ${detail}`
@@ -54,5 +56,5 @@ export function makeDirectBYOKClient(options: DirectConnection): LLMClient {
     if (!raw || typeof raw !== "object" || (provider === "openai" && !("choices" in raw)) || (provider === "anthropic" && !("content" in raw))) throw new Error("The endpoint returned an unsupported response. Choose the correct API adapter and a tool-capable model.");
     return raw;
   }, { signal: options.signal, retries: 2 });
-  return makeClientFromSend({ provider, model: options.model.trim(), maxTokens: 4096, send });
+  return makeClientFromSend({ provider, model: options.model.trim(), ...(provider === "anthropic" ? {} : { maxTokens: 4096 }), send });
 }

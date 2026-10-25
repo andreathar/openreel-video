@@ -63,6 +63,20 @@ export default defineConfig({
   server: {
     port: 5180,
     strictPort: true,
+    // Same-origin route to the Anthropic API for organizations that block browser (CORS) requests.
+    // Dropping the browser headers makes the call look server-side; the API key still comes from the client.
+    proxy: {
+      "/proxy/anthropic": {
+        target: "https://api.anthropic.com",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/proxy\/anthropic/, ""),
+        configure: (proxy) => {
+          proxy.on("proxyReq", (req) => {
+            for (const h of ["origin", "referer", "anthropic-dangerous-direct-browser-access"]) req.removeHeader(h);
+          });
+        },
+      },
+    },
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "require-corp",

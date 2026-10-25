@@ -14,6 +14,17 @@ describe("formatChatError", () => {
     });
   });
 
+  it("points an organization CORS block at the dev-server proxy", () => {
+    expect(
+      formatChatError(
+        "Model endpoint returned HTTP 401: authentication_error: CORS requests are not allowed for this Organization because of its settings.",
+      ),
+    ).toMatchObject({
+      title: "Browser requests blocked by your organization",
+      action: "ai-editor",
+    });
+  });
+
   it("turns network and CORS failures into endpoint guidance", () => {
     expect(
       formatChatError(

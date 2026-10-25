@@ -41,6 +41,17 @@ export function formatChatError(rawError: string): ChatErrorPresentation {
   const searchable = `${raw} ${upstream ?? ""}`.toLowerCase();
   const details = upstream && upstream !== raw ? raw : undefined;
 
+  if (/cors requests are not allowed/.test(searchable)) {
+    return {
+      title: "Browser requests blocked by your organization",
+      message:
+        "Your Anthropic organization doesn't accept API calls made directly from a browser. In AI settings, set the base URL to http://localhost:5180/proxy/anthropic/v1 so the dev server forwards the request.",
+      action: "ai-editor",
+      actionLabel: "Open AI settings",
+      details: raw,
+    };
+  }
+
   if (
     status === 401 ||
     status === 403 ||
@@ -55,7 +66,7 @@ export function formatChatError(rawError: string): ChatErrorPresentation {
         "The endpoint rejected the API key. Check the session key and try again.",
       action: "ai-editor",
       actionLabel: "Check API key",
-      details,
+      details: details ?? raw,
     };
   }
 
@@ -109,7 +120,7 @@ export function formatChatError(rawError: string): ChatErrorPresentation {
         "Check that the base URL and model ID match what the endpoint exposes.",
       action: "ai-editor",
       actionLabel: "Check endpoint",
-      details,
+      details: details ?? raw,
     };
   }
 

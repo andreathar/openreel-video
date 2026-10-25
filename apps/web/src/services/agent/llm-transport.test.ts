@@ -79,7 +79,7 @@ describe("compatible LLM transport", () => {
     );
     expect(body).toMatchObject({
       model: "gateway/claude-tool-model",
-      max_tokens: 4096,
+      max_tokens: 16000,
       system: "edit the video",
     });
   });

@@ -19,6 +19,8 @@ export interface LLMResponse {
   readonly toolUses: LLMToolUse[];
   readonly stopReason: LLMStopReason;
   readonly usage?: LLMUsage;
+  /** Anthropic content blocks as returned (thinking included), replayed unchanged on the next tool-loop turn. */
+  readonly anthropicContent?: readonly unknown[];
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -76,7 +78,7 @@ export interface LoopToolResult {
 
 export type LoopMessage =
   | { role: "user"; content: string }
-  | { role: "assistant"; content: string; toolUses: LLMToolUse[] }
+  | { role: "assistant"; content: string; toolUses: LLMToolUse[]; anthropicContent?: readonly unknown[] }
   | { role: "tool"; results: LoopToolResult[] };
 
 export interface LLMTurnInput {
@@ -217,6 +219,8 @@ export function buildAnthropicBody(
       return { role: "user", content: [{ type: "text", text: m.content }] };
     }
     if (m.role === "assistant") {
+      // Anthropic rejects a tool-loop turn whose thinking blocks were dropped or edited.
+      if (m.anthropicContent?.length) return { role: "assistant", content: m.anthropicContent };
       const content: unknown[] = [];
       if (m.content) content.push({ type: "text", text: m.content });
       for (const tu of m.toolUses) {
@@ -278,7 +282,8 @@ export function parseAnthropicResponse(raw: unknown): LLMResponse {
         outputTokens: tokenCount(r.usage.output_tokens),
       }
     : undefined;
-  return { text, toolUses, stopReason, usage };
+  const anthropicContent = Array.isArray(r.content) ? r.content : undefined;
+  return { text, toolUses, stopReason, usage, ...(anthropicContent ? { anthropicContent } : {}) };
 }
 
 export interface AdapterOptions {
@@ -287,10 +292,13 @@ export interface AdapterOptions {
   readonly send: LLMSend;
 }
 
+// Adaptive thinking spends output tokens before the answer, so 4096 truncates tool calls.
+const ANTHROPIC_DEFAULT_MAX_TOKENS = 16000;
+
 export class AnthropicClient implements LLMClient {
   constructor(private readonly options: AdapterOptions) {}
   async complete(input: LLMTurnInput): Promise<LLMResponse> {
-    const body = buildAnthropicBody(input, this.options.model, this.options.maxTokens ?? 4096);
+    const body = buildAnthropicBody(input, this.options.model, this.options.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS);
     const raw = await this.options.send(body);
     return parseAnthropicResponse(raw);
   }
@@ -447,7 +455,7 @@ export function makeClientFromSend(opts: ClientFromSendOptions): LLMClient {
   return opts.provider === "anthropic"
     ? new AnthropicClient({
         model: opts.model,
-        maxTokens: maxTokens ?? 4096,
+        maxTokens: opts.maxTokens,
         send: opts.send,
       })
     : new OpenAIClient({

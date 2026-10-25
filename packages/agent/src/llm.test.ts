@@ -47,6 +47,27 @@ describe("Anthropic normalization", () => {
     expect(parsed.stopReason).toBe("tool_use");
   });
 
+  it("replays thinking blocks unchanged on the next tool-loop turn", async () => {
+    const content = [
+      { type: "thinking", thinking: "plan the trim", signature: "sig-1" },
+      { type: "tool_use", id: "tu1", name: "trim_clip", input: { clipId: "c1" } },
+    ];
+    const bodies: Array<{ max_tokens: number; messages: Array<{ role: string; content: unknown }> }> = [];
+    const replies = [{ content, stop_reason: "tool_use" }, { content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }];
+    const client = new AnthropicClient({ model: "claude", send: async (body) => { bodies.push(body as never); return replies[bodies.length - 1]; } });
+    const first = await client.complete({ messages: [{ role: "user", content: "trim" }], tools: [] });
+    await client.complete({
+      messages: [
+        { role: "user", content: "trim" },
+        { role: "assistant", content: first.text, toolUses: first.toolUses, anthropicContent: first.anthropicContent },
+        { role: "tool", results: [{ toolUseId: "tu1", content: "ok", isError: false }] },
+      ],
+      tools: [],
+    });
+    expect(bodies[1].messages[1].content).toEqual(content);
+    expect(bodies[0].max_tokens).toBe(16000);
+  });
+
   it("AnthropicClient round-trips through an injected transport", async () => {
     const client = new AnthropicClient({
       model: "claude",

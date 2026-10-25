@@ -17,6 +17,13 @@ describe("direct BYOK adapters", () => {
     await expect(client.complete({ messages: [], tools: [] })).rejects.toThrow(/HTTP 401/);
     await expect(client.complete({ messages: [], tools: [] })).rejects.not.toThrow(/fixture-secret/);
   });
+  it("shows the remote JSON error type and message with key-like strings redacted", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key fixture-key sk-ant-api03-abcdef123" } }), { status: 401 })));
+    const client = makeDirectBYOKClient({ provider: "anthropic", baseUrl: "https://example.com/v1", model: "fixture-model", apiKey: "fixture-key" });
+    const error = await client.complete({ messages: [], tools: [] }).catch((e: Error) => e);
+    expect(String(error)).toMatch(/HTTP 401: authentication_error: invalid x-api-key/);
+    expect(String(error)).not.toMatch(/fixture-key|sk-ant/);
+  });
   it("explains browser network/CORS failure without proxying", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
     const client = makeDirectBYOKClient({ provider: "openai", baseUrl: "https://example.com/v1", model: "fixture", apiKey: "fixture" });

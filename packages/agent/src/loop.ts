@@ -160,7 +160,7 @@ export async function runTurn(input: RunTurnInput): Promise<RunTurnResult> {
       if (response.text) emit({ type: "text_delta", text: response.text });
 
       if (response.toolUses.length === 0) {
-        messages.push({ role: "assistant", content: response.text, toolUses: [] });
+        messages.push({ role: "assistant", content: response.text, toolUses: [], anthropicContent: response.anthropicContent });
         await commit();
         emit({ type: "turn_complete", text: response.text });
         return {
@@ -177,6 +177,7 @@ export async function runTurn(input: RunTurnInput): Promise<RunTurnResult> {
         role: "assistant",
         content: response.text,
         toolUses: response.toolUses,
+        anthropicContent: response.anthropicContent,
       });
 
       const results: LoopToolResult[] = [];
