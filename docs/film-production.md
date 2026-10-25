@@ -94,7 +94,8 @@ Rail button *Import script* opens *Import Script*. The steps at the top (*1 Draf
 already pasted you are asked to *Replace* it or *Keep* it). A badge says what the dialog thinks it
 is:
 
-- *Fountain screenplay*: the button is *Continue*; nothing is reformatted.
+- *Fountain screenplay*: the button is *Continue*; only page clutter (page numbers, `(MORE)`,
+  `(CONT'D)` and the like, see *Your words are never rewritten*) is cleaned up, by rules.
 - *Screenplay, needs formatting*: *Format script*, done by rules, no AI needed.
 - *Prose, AI will find scenes*: *Format script* uses the model chosen in AI settings, and the
   hint shows its name. Without a connection set up the prose still comes through, as action
@@ -103,22 +104,31 @@ is:
 
 *Cancel* stops a running format. If the model call fails, you get its error and the rule-based result.
 
+Changing the draft or dropping in another file does not touch the script in step 2. Only when
+you press *Format script*, *Continue* or (in step 2) *Reformat* is it replaced, and if you edited
+it by hand since the last format the dialog first asks *Replace your edited script?*: *Replace*
+formats again, *Keep my edits* keeps your text and shows step 2.
+
 **2 Script.** A summary line, then your draft with line numbers on the left and, on the right, the
 scene headings found and the editable *Fountain* text. Edit the Fountain freely; later steps use
-what is in the box. Above them, anything to check:
+what is in the box. While a format runs the box is read-only, *Reformat* reads *Formatting…* and
+*Cancel* stops the run. Above them, anything to check:
 
 - Headings the AI added are highlighted and carry `[[added by AI]]`, with a count.
 - *Lines 12–40: check this part: reason* for chunks the importer could not trust.
 - *Removed as page clutter:* the dropped page numbers and running headers.
 - *Missing from the result* and *Added* word lists from the word check.
 
-Buttons: *Reformat* (runs the conversion again on the draft), *Copy Fountain*, *Download
-.fountain* (named after the project code, for example `TH.fountain`, or `script.fountain` when
-there is none) and *Use this script*, which shows the number of problems when the word check
-found any.
+Buttons: *Reformat* (runs the conversion again on the draft; asks first if you edited the
+Fountain), *Copy Fountain*, *Download .fountain* (named after the project code, for example
+`TH.fountain`: the code typed in step 3, else the saved one, else one made from the title or
+project name, else `PROJ.fountain`) and *Use this script*, which shows the number of problems when
+the word check found any. It is disabled, with the reason next to it, while the script has no
+scene headings.
 
 **3 Shots.** Pick the *Video model*; its shot-length range sets how scenes are cut into shots. The
-*Project code* starts as the one saved in the project; changing it renames the shots (the line
+*Project code* starts as the one saved in the project, and an empty field falls back to it (or to
+one made from the title); changing it renames the shots (the line
 under it shows the first name, such as `TH_S001_SH01`). The table lists, per scene: *Pages*
 (hover for the eighths, for example `1 2/8`), *Est. length*, the number of shots with their
 lengths, and the cast. *Copy task list* and *CSV* export the shot list.
@@ -126,13 +136,15 @@ lengths, and the cast. *Copy task list* and *CSV* export the shot list.
 *Build timeline* adds a marker per scene and a placeholder clip per shot on the `SHOTS` track. If
 the script was built before the button reads *Rebuild timeline*: it replaces the `SHOTS` track
 and scene markers, keeping shots already relinked to real files. It is one undo. When it
-finishes the dialog says *Timeline built*, and *Open Shot Board* takes you to prompting.
+finishes the dialog says *Timeline built*, and *Open Shot Board* takes you to prompting. Changing
+the code or the model afterwards brings back *Rebuild timeline*.
 
 The video model chosen here becomes the default generator of the new shots; change it per shot on
 the Shot Board (*Generator*).
 
 The script is saved in `production.json` (`script`), so reopening *Import script* later starts at
-step 2 with the Fountain text. The original draft and the warnings from the first formatting are
+step 2 with the Fountain text. `prod.mjs init` and the assistant's `import_script` tool store it
+there too, replacing the one from an earlier import. The original draft and the warnings from the first formatting are
 not kept.
 
 `node scripts/production/eval-format.mjs` scores the model on three sample drafts in
